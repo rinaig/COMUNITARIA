@@ -1,0 +1,10 @@
+project_id = "replace-with-your-supabase-project-id"
+
+[db]
+major_version = 17
+
+[api]
+enabled = true
+schemas = ["public", "storage", "graphql_public"]
+extra_search_path = ["public", "extensions"]
+max_rows = 1000

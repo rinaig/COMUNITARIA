@@ -1,0 +1,25 @@
+<svg width="1280" height="720" viewBox="0 0 1280 720" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="comunitariaBlue" x1="250" y1="120" x2="930" y2="640" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#1E3A8A"/>
+      <stop offset="1" stop-color="#274690"/>
+    </linearGradient>
+    <filter id="softGlow" x="0" y="0" width="1280" height="720" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+      <feGaussianBlur stdDeviation="22" result="blur"/>
+      <feBlend in="SourceGraphic" in2="blur" mode="normal"/>
+    </filter>
+  </defs>
+  <rect width="1280" height="720" fill="#F8FAFC"/>
+  <g filter="url(#softGlow)">
+    <path d="M548 116C623 65 733 69 812 125C865 162 905 220 924 287" stroke="url(#comunitariaBlue)" stroke-width="26" stroke-linecap="round"/>
+    <path d="M438 472V207L511 158L592 206V429C592 454 571 475 546 475H438V472Z" fill="url(#comunitariaBlue)"/>
+    <path d="M617 307L751 183C763 171 783 171 795 183L929 307C946 323 934 352 911 352H887V473H768V374H720V473H601V352H577C554 352 542 323 559 307H617Z" fill="url(#comunitariaBlue)"/>
+    <path d="M876 475V297L940 249L1014 296V438C1014 459 997 475 976 475H876Z" fill="url(#comunitariaBlue)"/>
+    <path d="M470 293V258L520 223V442H558C567 442 574 435 574 426V340L611 305V429C611 454 590 475 565 475H470V293Z" fill="#F8FAFC"/>
+    <path d="M646 472V367H710V472H646Z" fill="#F8FAFC"/>
+    <circle cx="779" cy="304" r="18" fill="#F8FAFC" stroke="url(#comunitariaBlue)" stroke-width="12"/>
+    <path d="M661 336H693V310C693 297 704 286 717 286H840C853 286 864 297 864 310V336H896L779 221L661 336Z" fill="#F8FAFC"/>
+  </g>
+  <text x="640" y="598" text-anchor="middle" fill="url(#comunitariaBlue)" font-family="Arial, Helvetica, sans-serif" font-size="98" font-weight="700" letter-spacing="4">COMUNITARIA</text>
+  <text x="640" y="654" text-anchor="middle" fill="#274690" font-family="Arial, Helvetica, sans-serif" font-size="28" font-weight="400">La gestion de tu comunidad, transparente e inteligente</text>
+</svg>
