@@ -68,6 +68,7 @@ Este proyecto ya esta listo para trabajar con un flujo versionado de base de dat
 - El esquema actual tambien quedo guardado como migracion inicial en supabase/migrations/20260518120000_initial_schema.sql.
 - La configuracion base de Supabase CLI vive en supabase/config.toml.
 - Hay un workflow en .github/workflows/supabase-db-push.yml para ejecutar `supabase db push` cuando subas cambios a main.
+- Hay un workflow adicional en .github/workflows/outbound-queue.yml que procesa automaticamente la cola saliente cada 15 minutos y tambien puede lanzarse manualmente.
 
 ### Que conviene hacer ahora
 
@@ -82,6 +83,7 @@ Conviene hacerlo ahora y no al final. Gran parte del valor del producto ya depen
 	- SUPABASE_ACCESS_TOKEN
 	- SUPABASE_PROJECT_ID
 	- SUPABASE_DB_PASSWORD
+	- SUPABASE_SERVICE_ROLE_KEY
 5. Reemplazar el project_id de supabase/config.toml por el id real del proyecto Supabase.
 
 ### Comandos locales para dejarlo enlazado
@@ -99,6 +101,7 @@ git push -u origin main
 - SUPABASE_PROJECT_ID: aparece en la URL del dashboard del proyecto y en Project Settings.
 - SUPABASE_DB_PASSWORD: es la password que definiste al crear el proyecto.
 - SUPABASE_ACCESS_TOKEN: se genera en https://supabase.com/dashboard/account/tokens.
+- SUPABASE_SERVICE_ROLE_KEY: se obtiene en Supabase > Project Settings > Data API junto con la anon key; este secret lo usa el workflow de procesamiento automatico de notificacion_salidas.
 
 ## Validaciones
 

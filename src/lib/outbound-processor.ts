@@ -1,5 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import type { JsonObject } from "@/lib/supabase-server";
+
+type JsonValue = string | number | boolean | null | { [key: string]: JsonValue } | JsonValue[];
+export type JsonObject = { [key: string]: JsonValue };
 
 type DeliveryChannel = "email" | "whatsapp";
 type DeliveryStatus = "pendiente" | "enviado" | "fallido" | "omitido";
