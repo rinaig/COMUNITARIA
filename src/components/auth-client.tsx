@@ -506,7 +506,7 @@ export function AuthClient() {
                         onClick={() => setAdminOnboardingMode("sumarme")}
                         type="button"
                       >
-                        Sumarme a consorcio existente
+                        Sumarme a un consorcio existente
                       </button>
                     </div>
                   ) : null}
@@ -565,7 +565,7 @@ export function AuthClient() {
 
                   <div className="mt-6">
                     <button className="button-primary" disabled={busy} onClick={() => void completeOnboarding()} type="button">
-                      {busy ? "Guardando..." : accountType === "admin" && adminOnboardingMode === "sumarme" ? "Solicitar acceso administrativo" : accountType === "admin" && adminOnboardingMode === "demo" ? "Crear modo demo gratis" : "Completar onboarding"}
+                      {busy ? "Guardando..." : accountType === "admin" && adminOnboardingMode === "sumarme" ? "Solicitar acceso como administrador" : accountType === "admin" && adminOnboardingMode === "demo" ? "Activar demo ahora" : accountType === "admin" ? "Crear consorcio ahora" : "Unirme ahora"}
                     </button>
                   </div>
                 </article>
@@ -680,7 +680,7 @@ export function AuthClient() {
                     </button>
                     <button
                       className={accountType === "admin" ? "button-primary" : "button-secondary"}
-                      onClick={() => { setAccountType("admin"); setAdminOnboardingMode("demo"); }}
+                      onClick={() => { setAccountType("admin"); setAdminOnboardingMode(invitePrefill.adminMode); }}
                       type="button"
                     >
                       Cuenta de administrador
@@ -718,19 +718,29 @@ export function AuthClient() {
                         <div className="md:col-span-2 flex flex-wrap gap-3">
                           <button className={adminOnboardingMode === "demo" ? "button-primary" : "button-secondary"} onClick={() => setAdminOnboardingMode("demo")} type="button">Modo demo gratis</button>
                           <button className={adminOnboardingMode === "crear" ? "button-primary" : "button-secondary"} onClick={() => setAdminOnboardingMode("crear")} type="button">Consorcio real</button>
+                          <button className={adminOnboardingMode === "sumarme" ? "button-primary" : "button-secondary"} onClick={() => setAdminOnboardingMode("sumarme")} type="button">Sumarme con codigo</button>
                         </div>
-                        <label>
-                          <span className="field-label">{adminOnboardingMode === "demo" ? "Nombre del espacio demo" : "Nombre del consorcio"}</span>
-                          <input className="field mt-2" onChange={(event) => setConsorcioNombre(event.target.value)} required value={consorcioNombre} />
-                        </label>
-                        <label>
-                          <span className="field-label">{adminOnboardingMode === "demo" ? "Descripcion corta" : "Direccion"}</span>
-                          <input className="field mt-2" onChange={(event) => setConsorcioDireccion(event.target.value)} required value={consorcioDireccion} />
-                        </label>
-                        <label className="md:col-span-2">
-                          <span className="field-label">CUIT</span>
-                          <input className="field mt-2" onChange={(event) => setCuit(event.target.value)} value={cuit} />
-                        </label>
+                        {adminOnboardingMode === "sumarme" ? (
+                          <label className="md:col-span-2">
+                            <span className="field-label">Codigo de consorcio</span>
+                            <input className="field mt-2 uppercase" onChange={(event) => setInviteCode(event.target.value.toUpperCase())} required value={inviteCode} />
+                          </label>
+                        ) : (
+                          <>
+                            <label>
+                              <span className="field-label">{adminOnboardingMode === "demo" ? "Nombre del espacio demo" : "Nombre del consorcio"}</span>
+                              <input className="field mt-2" onChange={(event) => setConsorcioNombre(event.target.value)} required value={consorcioNombre} />
+                            </label>
+                            <label>
+                              <span className="field-label">{adminOnboardingMode === "demo" ? "Descripcion corta" : "Direccion"}</span>
+                              <input className="field mt-2" onChange={(event) => setConsorcioDireccion(event.target.value)} required value={consorcioDireccion} />
+                            </label>
+                            <label className="md:col-span-2">
+                              <span className="field-label">CUIT</span>
+                              <input className="field mt-2" onChange={(event) => setCuit(event.target.value)} value={cuit} />
+                            </label>
+                          </>
+                        )}
                       </>
                     ) : (
                       <>
@@ -748,7 +758,7 @@ export function AuthClient() {
 
                   <div className="flex flex-wrap gap-3 pt-2">
                     <button className="button-primary" disabled={busy} type="submit">
-                      {busy ? "Creando..." : accountType === "admin" && adminOnboardingMode === "demo" ? "Crear cuenta y modo demo" : "Crear cuenta y vincular"}
+                      {busy ? "Creando..." : accountType === "admin" && adminOnboardingMode === "demo" ? "Crear cuenta y activar demo" : accountType === "admin" && adminOnboardingMode === "crear" ? "Crear cuenta y consorcio" : accountType === "admin" ? "Crear cuenta y solicitar acceso" : "Crear cuenta y unirme"}
                     </button>
                     <button className="button-secondary" disabled={busy} onClick={() => void handleGoogleLogin()} type="button">
                       Continuar con Google

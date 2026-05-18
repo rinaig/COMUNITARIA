@@ -1041,7 +1041,7 @@ begin
     coalesce(p_activo, false),
     current_user_id
   )
-  on conflict (consorcio_id, canal)
+  on conflict on constraint consorcio_channel_integrations_consorcio_id_canal_key
   do update set
     proveedor = excluded.proveedor,
     remitente = excluded.remitente,
@@ -2713,7 +2713,7 @@ begin
     p_destino_cobro,
     nullif(trim(coalesce(p_observaciones, '')), '')
   )
-  on conflict (consorcio_id)
+  on conflict on constraint consorcio_suscripciones_consorcio_id_key
   do update set
     admin_id = case when current_access_role = 'admin' then current_user_id else public.consorcio_suscripciones.admin_id end,
     monto_mensual = excluded.monto_mensual,
@@ -2815,7 +2815,7 @@ begin
     current_user_id
   from public.unidades_funcionales unidad
   where unidad.consorcio_id = current_consorcio
-  on conflict (consorcio_id, unidad_id, periodo_referencia)
+  on conflict on constraint cargos_plataforma_unidad_consorcio_id_unidad_id_periodo_refere_key
   do update set
     suscripcion_id = excluded.suscripcion_id,
     destino_cobro = excluded.destino_cobro,
