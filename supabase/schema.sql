@@ -47,6 +47,58 @@ create table if not exists public.consorcios (
 alter table public.consorcios add column if not exists es_demo boolean not null default false;
 alter table public.consorcios add column if not exists demo_unit_limit integer not null default 3;
 
+create table if not exists public.profiles (
+  id uuid primary key references auth.users(id) on delete cascade,
+  consorcio_id uuid references public.consorcios(id) on delete set null,
+  rol public.app_role not null default 'residente',
+  nombre text not null default '',
+  apellido text not null default '',
+  email text not null unique,
+  telefono text,
+  dni text,
+  unidad_funcional text,
+  es_menor boolean not null default false,
+  adulto_responsable_id uuid,
+  adulto_responsable_email text,
+  estado public.profile_status not null default 'pendiente',
+  created_at timestamptz not null default timezone('utc', now()),
+  updated_at timestamptz not null default timezone('utc', now())
+);
+
+alter table public.profiles add column if not exists es_menor boolean not null default false;
+alter table public.profiles add column if not exists adulto_responsable_id uuid;
+alter table public.profiles add column if not exists adulto_responsable_email text;
+
+do $$
+begin
+  if not exists (
+    select 1
+    from pg_constraint
+    where conname = 'profiles_adulto_responsable_id_fkey'
+  ) then
+    alter table public.profiles
+      add constraint profiles_adulto_responsable_id_fkey
+      foreign key (adulto_responsable_id)
+      references public.profiles(id)
+      on delete set null;
+  end if;
+end;
+$$;
+
+create table if not exists public.unidades_funcionales (
+  id uuid primary key default gen_random_uuid(),
+  consorcio_id uuid not null references public.consorcios(id) on delete cascade,
+  codigo text not null,
+  piso text,
+  departamento text,
+  propietario_nombre text,
+  propietario_email text,
+  coeficiente numeric(10,4),
+  max_reservas_mensuales integer not null default 2,
+  created_at timestamptz not null default timezone('utc', now()),
+  unique (consorcio_id, codigo)
+);
+
 create table if not exists public.consorcio_channel_integrations (
   id uuid primary key default gen_random_uuid(),
   consorcio_id uuid not null references public.consorcios(id) on delete cascade,
@@ -123,58 +175,6 @@ create table if not exists public.cargos_plataforma_unidad (
 
 alter table public.cargos_plataforma_unidad add column if not exists enlace_pago text;
 alter table public.cargos_plataforma_unidad add column if not exists comprobante_url text;
-
-create table if not exists public.profiles (
-  id uuid primary key references auth.users(id) on delete cascade,
-  consorcio_id uuid references public.consorcios(id) on delete set null,
-  rol public.app_role not null default 'residente',
-  nombre text not null default '',
-  apellido text not null default '',
-  email text not null unique,
-  telefono text,
-  dni text,
-  unidad_funcional text,
-  es_menor boolean not null default false,
-  adulto_responsable_id uuid,
-  adulto_responsable_email text,
-  estado public.profile_status not null default 'pendiente',
-  created_at timestamptz not null default timezone('utc', now()),
-  updated_at timestamptz not null default timezone('utc', now())
-);
-
-alter table public.profiles add column if not exists es_menor boolean not null default false;
-alter table public.profiles add column if not exists adulto_responsable_id uuid;
-alter table public.profiles add column if not exists adulto_responsable_email text;
-
-do $$
-begin
-  if not exists (
-    select 1
-    from pg_constraint
-    where conname = 'profiles_adulto_responsable_id_fkey'
-  ) then
-    alter table public.profiles
-      add constraint profiles_adulto_responsable_id_fkey
-      foreign key (adulto_responsable_id)
-      references public.profiles(id)
-      on delete set null;
-  end if;
-end;
-$$;
-
-create table if not exists public.unidades_funcionales (
-  id uuid primary key default gen_random_uuid(),
-  consorcio_id uuid not null references public.consorcios(id) on delete cascade,
-  codigo text not null,
-  piso text,
-  departamento text,
-  propietario_nombre text,
-  propietario_email text,
-  coeficiente numeric(10,4),
-  max_reservas_mensuales integer not null default 2,
-  created_at timestamptz not null default timezone('utc', now()),
-  unique (consorcio_id, codigo)
-);
 
 create table if not exists public.padron_accesos_importados (
   id uuid primary key default gen_random_uuid(),
