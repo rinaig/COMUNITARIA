@@ -893,7 +893,7 @@ begin
   values
     (created_consorcio_id, 'email', 'smtp', null, '{}'::jsonb, true, false, current_user_id),
     (created_consorcio_id, 'whatsapp', 'meta', null, '{}'::jsonb, true, false, current_user_id)
-  on conflict (consorcio_id, canal) do nothing;
+  on conflict on constraint consorcio_channel_integrations_consorcio_id_canal_key do nothing;
 
   return query
   select current_user_id, created_consorcio_id, generated_code;
@@ -977,13 +977,13 @@ begin
     0,
     'Tenant demo autogestionado con limite de 3 unidades funcionales.'
   )
-  on conflict (consorcio_id) do nothing;
+  on conflict on constraint consorcio_suscripciones_consorcio_id_key do nothing;
 
   insert into public.consorcio_channel_integrations (consorcio_id, canal, proveedor, remitente, credenciales, modo_prueba, activo, updated_by)
   values
     (created_consorcio_id, 'email', 'smtp', null, '{}'::jsonb, true, false, current_user_id),
     (created_consorcio_id, 'whatsapp', 'meta', null, '{}'::jsonb, true, false, current_user_id)
-  on conflict (consorcio_id, canal) do nothing;
+  on conflict on constraint consorcio_channel_integrations_consorcio_id_canal_key do nothing;
 
   return query
   select current_user_id, created_consorcio_id, generated_code;
