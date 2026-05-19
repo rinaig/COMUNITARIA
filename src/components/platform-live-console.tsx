@@ -5,11 +5,6 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import type { Session } from "@supabase/supabase-js";
 import type { ProfileRecord } from "@/lib/auth-types";
 import { PlatformBillingPanel } from "@/components/platform-billing-panel";
-import {
-  platformDemoAccounts,
-  platformDemoNotes,
-  platformDemoSummary,
-} from "@/lib/domain";
 import { getSupabaseBrowserClient, isSupabaseConfigured } from "@/lib/supabase";
 
 type Tenant = {
@@ -57,9 +52,20 @@ export function PlatformLiveConsole() {
   const [profile, setProfile] = useState<ProfileRecord | null>(null);
   const [loading, setLoading] = useState(() => configured);
   const [error, setError] = useState("");
-  const [metrics, setMetrics] = useState(platformDemoSummary);
-  const [rows, setRows] = useState<PlatformRow[]>(platformDemoAccounts);
-  const [mode, setMode] = useState<"demo" | "real">("demo");
+  const [metrics, setMetrics] = useState({
+    activeConsorcios: 0,
+    activeAdmins: 0,
+    pendingAdmins: 0,
+    totalUsers: 0,
+    monthlyGrowth: "Sin actividad",
+  });
+  const [rows, setRows] = useState<PlatformRow[]>([]);
+
+  const platformNotes = [
+    "Esta consola es solo para el propietario de plataforma y no se publica en la web.",
+    "Los datos se muestran de forma agregada por consorcio y administrador, sin exponer residentes individuales.",
+    "La gestion comercial y de pagos se concentra en el panel de suscripciones y cobranzas.",
+  ];
 
   const loadRealConsole = useCallback(async (userId: string) => {
     if (!supabase) {
@@ -85,7 +91,7 @@ export function PlatformLiveConsole() {
     setProfile(nextProfile);
 
     if (!nextProfile || nextProfile.rol !== "superadmin") {
-      setMode("demo");
+      setRows([]);
       setLoading(false);
       return;
     }
@@ -100,7 +106,6 @@ export function PlatformLiveConsole() {
     const firstError = [tenantsResult.error, adminsResult.error, aggregateProfilesResult.error, subscriptionsResult.error].find(Boolean);
     if (firstError) {
       setError(firstError.message);
-      setMode("demo");
       setLoading(false);
       return;
     }
@@ -155,7 +160,6 @@ export function PlatformLiveConsole() {
       monthlyGrowth: nextRows.length > 0 ? "Base real conectada" : "Sin actividad",
     });
     setRows(nextRows);
-    setMode("real");
     setLoading(false);
   }, [supabase]);
 
@@ -183,7 +187,7 @@ export function PlatformLiveConsole() {
       if (data.session?.user) {
         await loadRealConsole(data.session.user.id);
       } else {
-        setMode("demo");
+        setRows([]);
         setLoading(false);
       }
     };
@@ -202,28 +206,26 @@ export function PlatformLiveConsole() {
       <section className="grid gap-6 lg:grid-cols-[1.1fr_0.9fr]">
         <article className="glass-panel rounded-[2rem] p-8">
           <p className="text-xs uppercase tracking-[0.28em] text-slate-500">
-            {mode === "real" ? "Consola interna real" : "Consola interna demo"}
+            Consola interna real
           </p>
           <h2 className="mt-4 text-4xl font-semibold tracking-[-0.05em] text-slate-950">
             Vista de plataforma para operar Comunitaria sin exponer datos privados.
           </h2>
           <p className="mt-4 max-w-3xl text-base leading-8 text-slate-600">
-            {mode === "real"
-              ? "Estas viendo administradores y volumen agregado real desde Supabase. Los datos sensibles de residentes no se exponen en esta capa."
-              : "Este espacio representa tu capa interna como operador del SaaS. Si ingresas como superadmin y Supabase esta configurado, la consola pasa a datos reales."}
+            Estas viendo administradores, consorcios y volumen agregado real desde Supabase. Los datos sensibles de residentes no se exponen en esta capa.
           </p>
 
           {error ? <article className="role-card mt-6 border-amber-200 bg-amber-50/80"><p className="text-sm font-semibold text-amber-700">Error</p><p className="mt-2 text-sm leading-7 text-amber-700">{error}</p></article> : null}
 
-          {!configured ? <article className="role-card mt-6"><p className="text-sm leading-7 text-slate-700">Supabase no esta configurado, por eso esta vista sigue en modo demo.</p></article> : null}
-          {configured && session && !isSuperadmin ? <article className="role-card mt-6"><p className="text-sm leading-7 text-slate-700">La sesion actual no es superadmin. Se mantiene el modo demo para no mezclar la consola interna con los portales del consorcio.</p></article> : null}
+          {!configured ? <article className="role-card mt-6"><p className="text-sm leading-7 text-slate-700">Supabase no esta configurado. Esta consola requiere conexion real.</p></article> : null}
+          {configured && session && !isSuperadmin ? <article className="role-card mt-6"><p className="text-sm leading-7 text-slate-700">La sesion actual no tiene permisos de SuperUser.</p></article> : null}
           {loading ? <article className="role-card mt-6"><p className="text-sm leading-7 text-slate-700">Cargando consola de plataforma.</p></article> : null}
 
           <div className="mt-8 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
             <article className="metric-card">
               <span>Consorcios activos</span>
               <strong>{metrics.activeConsorcios}</strong>
-              <small>{mode === "real" ? "Base agregada" : "Operando en la demo"}</small>
+              <small>Base agregada</small>
             </article>
             <article className="metric-card">
               <span>Administradores activos</span>
@@ -237,7 +239,7 @@ export function PlatformLiveConsole() {
             </article>
             <article className="metric-card">
               <span>Estado plataforma</span>
-              <strong>{mode === "real" ? "Conectada" : "Demo"}</strong>
+              <strong>{isSuperadmin ? "Conectada" : "Restringida"}</strong>
               <small>{metrics.monthlyGrowth}</small>
             </article>
           </div>
@@ -245,10 +247,10 @@ export function PlatformLiveConsole() {
 
         <article className="glass-panel rounded-[2rem] p-8">
           <p className="text-xs uppercase tracking-[0.28em] text-slate-500">
-            Proximo paso real
+            Operacion interna
           </p>
           <div className="mt-6 grid gap-4">
-            {platformDemoNotes.map((item) => (
+            {platformNotes.map((item) => (
               <article className="role-card" key={item}>
                 <p className="text-base leading-7 text-slate-700">{item}</p>
               </article>
@@ -268,14 +270,14 @@ export function PlatformLiveConsole() {
         <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
           <div>
             <p className="text-xs uppercase tracking-[0.28em] text-slate-500">
-              {mode === "real" ? "Administradores reales" : "Administradores demo"}
+              Administradores reales
             </p>
             <h3 className="mt-3 text-3xl font-semibold tracking-[-0.04em] text-slate-950">
               Seguimiento agregado por consorcio y administrador.
             </h3>
           </div>
-          <Link className="button-secondary" href="/portal/admin">
-            Volver al demo de consorcio
+          <Link className="button-secondary" href="/auth">
+            Volver a mi acceso
           </Link>
         </div>
 
@@ -306,6 +308,11 @@ export function PlatformLiveConsole() {
               </div>
             </div>
           ))}
+          {!rows.length && !loading ? (
+            <div className="px-5 py-6 text-sm leading-7 text-slate-600">
+              No hay administradores visibles para la cuenta actual.
+            </div>
+          ) : null}
         </div>
       </section>
 

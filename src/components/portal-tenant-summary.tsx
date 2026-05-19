@@ -4,23 +4,13 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import type { Session } from "@supabase/supabase-js";
 import { getSupabaseBrowserClient, isSupabaseConfigured } from "@/lib/supabase";
 
-type TenantFallback = {
-  code: string;
-  name: string;
-  address: string;
-};
-
 type TenantSummary = {
   nombre: string;
   direccion: string;
   codigo_invitacion: string;
 };
 
-type PortalTenantSummaryProps = {
-  fallback: TenantFallback;
-};
-
-export function PortalTenantSummary({ fallback }: PortalTenantSummaryProps) {
+export function PortalTenantSummary() {
   const supabase = useMemo(() => getSupabaseBrowserClient(), []);
   const configured = isSupabaseConfigured();
   const [session, setSession] = useState<Session | null>(null);
@@ -93,9 +83,9 @@ export function PortalTenantSummary({ fallback }: PortalTenantSummaryProps) {
     };
   }, [configured, loadTenant, supabase]);
 
-  const code = session?.user && tenant?.codigo_invitacion ? tenant.codigo_invitacion : fallback.code;
-  const name = session?.user && tenant?.nombre ? tenant.nombre : fallback.name;
-  const address = session?.user && tenant?.direccion ? tenant.direccion : fallback.address;
+  const code = session?.user && tenant?.codigo_invitacion ? tenant.codigo_invitacion : "PLATAFORMA";
+  const name = session?.user && tenant?.nombre ? tenant.nombre : "Comunitaria";
+  const address = session?.user && tenant?.direccion ? tenant.direccion : "Gestion operativa para consorcios, barrios privados y countries.";
 
   return (
     <div>
@@ -106,7 +96,7 @@ export function PortalTenantSummary({ fallback }: PortalTenantSummaryProps) {
         {name}
       </h1>
       <p className="mt-2 max-w-2xl text-sm leading-7 text-slate-600">
-        {address}. Arquitectura multi-tenant lista para Supabase con aislamiento por consorcio, paneles por rol y capas separadas para operaciones, finanzas y seguridad.
+        {address}
       </p>
     </div>
   );

@@ -13,9 +13,9 @@ type PortalAccessGuardProps = {
 };
 
 const roleLabel: Record<AppRole, string> = {
-  superadmin: "SuperAdmin",
+  superadmin: "SuperUser",
   admin: "Administrador",
-  residente: "Residente",
+  residente: "Usuario",
   seguridad: "Seguridad",
 };
 
@@ -61,7 +61,7 @@ export function PortalAccessGuard({ requiredRole, children }: PortalAccessGuardP
 
     const { data: tenantData, error: tenantError } = await supabase
       .from("consorcios")
-      .select("id, nombre, direccion, codigo_invitacion, es_demo, demo_unit_limit")
+      .select("id, nombre, direccion, codigo_invitacion, tipo, tipo_otro, trial_unit_limit, trial_guard_post_limit, contacto_email, contacto_telefono")
       .eq("id", nextProfile.consorcio_id)
       .maybeSingle();
 
@@ -148,14 +148,11 @@ export function PortalAccessGuard({ requiredRole, children }: PortalAccessGuardP
           Ingresa para abrir este portal.
         </h2>
         <p className="mt-3 max-w-2xl text-base leading-8 text-slate-600">
-          Este modulo exige autenticacion real. Si queres probar el flujo, entra por la pantalla de acceso y completa el onboarding.
+          Este modulo exige autenticacion real. Ingresa desde la pantalla de acceso y completa el alta correspondiente.
         </p>
         <div className="mt-6 flex flex-wrap gap-3">
           <Link className="button-primary" href="/auth">
             Ir a acceso
-          </Link>
-          <Link className="button-secondary" href="/portal">
-            Volver al indice del portal
           </Link>
         </div>
       </div>
@@ -171,16 +168,20 @@ export function PortalAccessGuard({ requiredRole, children }: PortalAccessGuardP
     );
   }
 
+  if (profile?.rol === "superadmin" && requiredRole === "superadmin") {
+    return <>{children}</>;
+  }
+
   if (!profile?.consorcio_id) {
     return (
       <div className="glass-panel rounded-[2rem] p-8">
-        <p className="text-sm font-semibold text-slate-500">Onboarding incompleto</p>
+        <p className="text-sm font-semibold text-slate-500">Alta incompleta</p>
         <p className="mt-3 text-base leading-7 text-slate-700">
           Tu cuenta existe, pero todavia no esta vinculada a un consorcio. Completa el alta desde la pantalla de acceso.
         </p>
         <div className="mt-6 flex flex-wrap gap-3">
           <Link className="button-primary" href="/auth">
-            Completar onboarding
+            Completar alta
           </Link>
         </div>
       </div>
@@ -197,7 +198,7 @@ export function PortalAccessGuard({ requiredRole, children }: PortalAccessGuardP
         <p className="mt-3 max-w-2xl text-base leading-8 text-slate-600">
           El administrador del consorcio {tenant?.nombre ?? "seleccionado"} debe revisar tu alta antes de habilitar el portal.
         </p>
-        {tenant?.es_demo ? <p className="mt-3 text-sm leading-7 text-emerald-700">Este tenant esta en modo demo gratuito y puede operar hasta {tenant.demo_unit_limit} unidades.</p> : null}
+        {requiredRole === "admin" && tenant?.trial_unit_limit ? <p className="mt-3 text-sm leading-7 text-emerald-700">Durante la prueba inicial puedes operar hasta {tenant.trial_unit_limit} unidades y {tenant.trial_guard_post_limit} puesto de vigilancia.</p> : null}
         <div className="mt-6 flex flex-wrap gap-3">
           <Link className="button-secondary" href="/auth">
             Ver estado de la cuenta

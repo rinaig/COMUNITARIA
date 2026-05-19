@@ -5,7 +5,7 @@ import type { Session } from "@supabase/supabase-js";
 import { getCurrentConsorcioId } from "@/lib/storage";
 import { getSupabaseBrowserClient, isSupabaseConfigured } from "@/lib/supabase";
 
-type AccessRole = "residente" | "admin";
+type AccessRole = "residente" | "admin" | "seguridad";
 
 type AccessRosterRow = {
   nombre: string;
@@ -14,6 +14,7 @@ type AccessRosterRow = {
   telefono: string | null;
   dni: string | null;
   unidad_funcional: string | null;
+  puesto_vigilancia: string | null;
   es_menor: boolean;
   adulto_responsable_email: string | null;
 };
@@ -26,10 +27,12 @@ type ParsedAccessRow = AccessRosterRow & {
 type ExistingAccessRow = AccessRosterRow & {
   id: string;
   rol_objetivo: AccessRole;
+  codigo_acceso: string | null;
+  codigo_acceso_expires_at: string | null;
   estado_reclamo: "no_reclamado" | "pendiente" | "activo";
 };
 
-const ACCESS_HEADERS = ["nombre", "apellido", "email", "telefono", "dni", "unidad_funcional"];
+const ACCESS_HEADERS = ["nombre", "apellido", "email", "telefono", "dni", "unidad_funcional", "puesto_vigilancia"];
 const OPTIONAL_ACCESS_HEADERS = ["es_menor", "adulto_responsable_email"];
 
 function parseCsvLine(line: string) {
@@ -106,6 +109,7 @@ function parseAccessCsv(content: string) {
       telefono: normalizeNullable(raw.telefono),
       dni: normalizeNullable(raw.dni),
       unidad_funcional: normalizeNullable(raw.unidad_funcional)?.toUpperCase() ?? null,
+      puesto_vigilancia: normalizeNullable(raw.puesto_vigilancia),
       es_menor: normalizeBoolean(raw.es_menor),
       adulto_responsable_email: normalizeNullable(raw.adulto_responsable_email)?.toLowerCase() ?? null,
       issues,
@@ -147,7 +151,6 @@ export function AdminAccessRosterImportPanel() {
   const [fileName, setFileName] = useState("");
   const [parsedRows, setParsedRows] = useState<ParsedAccessRow[]>([]);
   const [existingRows, setExistingRows] = useState<ExistingAccessRow[]>([]);
-  const [inviteCode, setInviteCode] = useState("");
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
 
@@ -160,23 +163,9 @@ export function AdminAccessRosterImportPanel() {
     setError("");
 
     const consorcioId = await getCurrentConsorcioId(supabase, userId);
-    const { data: tenantData, error: tenantError } = await supabase
-      .from("consorcios")
-      .select("codigo_invitacion")
-      .eq("id", consorcioId)
-      .maybeSingle();
-
-    if (tenantError) {
-      setError(tenantError.message);
-      setLoading(false);
-      return;
-    }
-
-    setInviteCode(tenantData?.codigo_invitacion ?? "");
-
     const { data, error: loadError } = await supabase
       .from("padron_accesos_importados")
-      .select("id, rol_objetivo, nombre, apellido, email, telefono, dni, unidad_funcional, es_menor, adulto_responsable_email")
+      .select("id, rol_objetivo, nombre, apellido, email, telefono, dni, unidad_funcional, puesto_vigilancia, es_menor, adulto_responsable_email, codigo_acceso, codigo_acceso_expires_at")
       .eq("consorcio_id", consorcioId)
       .eq("rol_objetivo", role)
       .order("apellido", { ascending: true })
@@ -309,6 +298,7 @@ export function AdminAccessRosterImportPanel() {
         telefono: row.telefono,
         dni: row.dni,
         unidad_funcional: roleMode === "residente" ? row.unidad_funcional : null,
+        puesto_vigilancia: roleMode === "seguridad" ? row.puesto_vigilancia : null,
         es_menor: roleMode === "residente" ? row.es_menor : false,
         adulto_responsable_email: roleMode === "residente" ? row.adulto_responsable_email : null,
         origen: "csv",
@@ -323,7 +313,7 @@ export function AdminAccessRosterImportPanel() {
         throw importError;
       }
 
-      setMessage(`${payload.length} registros de ${roleMode === "residente" ? "residentes" : "administradores"} procesados.`);
+      setMessage(`${payload.length} registros de ${roleMode === "residente" ? "usuarios" : roleMode === "seguridad" ? "seguridad" : "administradores"} procesados.`);
       setParsedRows([]);
       setFileName("");
       await loadRoster(roleMode, session.user.id);
@@ -344,7 +334,7 @@ export function AdminAccessRosterImportPanel() {
 
     const { data, error: exportError } = await supabase
       .from("padron_accesos_importados")
-      .select("nombre, apellido, email, telefono, dni, unidad_funcional, es_menor, adulto_responsable_email")
+      .select("nombre, apellido, email, telefono, dni, unidad_funcional, puesto_vigilancia, es_menor, adulto_responsable_email")
       .eq("rol_objetivo", roleMode)
       .order("apellido", { ascending: true })
       .order("nombre", { ascending: true });
@@ -365,6 +355,7 @@ export function AdminAccessRosterImportPanel() {
         telefono: row.telefono,
         dni: row.dni,
         unidad_funcional: row.unidad_funcional,
+        puesto_vigilancia: row.puesto_vigilancia,
         es_menor: row.es_menor ? "si" : "",
         adulto_responsable_email: row.adulto_responsable_email,
       })),
@@ -374,18 +365,14 @@ export function AdminAccessRosterImportPanel() {
   }
 
   function buildInviteUrl(row: ExistingAccessRow) {
-    if (typeof window === "undefined" || !inviteCode) {
+    if (typeof window === "undefined" || !row.codigo_acceso) {
       return "";
     }
 
     const url = new URL("/auth", window.location.origin);
-    url.searchParams.set("codigo", inviteCode);
+    url.searchParams.set("codigo", row.codigo_acceso);
     url.searchParams.set("tipo", row.rol_objetivo);
     url.searchParams.set("email", row.email);
-
-    if (row.rol_objetivo === "admin") {
-      url.searchParams.set("modo", "sumarme");
-    }
 
     if (row.rol_objetivo === "residente" && row.unidad_funcional) {
       url.searchParams.set("unidad", row.unidad_funcional);
@@ -468,9 +455,9 @@ export function AdminAccessRosterImportPanel() {
       <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
         <div>
           <p className="text-xs uppercase tracking-[0.28em] text-slate-500">Padron de accesos</p>
-          <h3 className="mt-3 text-3xl font-semibold tracking-[-0.04em] text-slate-950">CSV de residentes y administradores</h3>
+          <h3 className="mt-3 text-3xl font-semibold tracking-[-0.04em] text-slate-950">CSV de usuarios, administradores y seguridad</h3>
         </div>
-        <p className="max-w-xl text-sm leading-7 text-slate-600">Este padron no crea usuarios auth: prepara y mantiene la base importada para accesos futuros y para vincular residentes por email al momento de solicitar ingreso.</p>
+        <p className="max-w-xl text-sm leading-7 text-slate-600">Este padron no crea usuarios auth: prepara invitaciones individuales con codigo propio para cada alta futura.</p>
       </div>
 
       {error ? <article className="role-card mt-6 border-amber-200 bg-amber-50/80"><p className="text-sm font-semibold text-amber-700">Error</p><p className="mt-2 text-sm leading-7 text-amber-700">{error}</p></article> : null}
@@ -479,8 +466,8 @@ export function AdminAccessRosterImportPanel() {
       <div className="mt-6 flex flex-wrap gap-3">
         <button className={roleMode === "residente" ? "button-primary" : "button-secondary"} onClick={() => setRoleMode("residente")} type="button">Residentes</button>
         <button className={roleMode === "admin" ? "button-primary" : "button-secondary"} onClick={() => setRoleMode("admin")} type="button">Administradores</button>
+        <button className={roleMode === "seguridad" ? "button-primary" : "button-secondary"} onClick={() => setRoleMode("seguridad")} type="button">Seguridad</button>
         <button className="button-secondary" disabled={exporting} onClick={() => void handleExport()} type="button">{exporting ? "Exportando..." : "Exportar CSV actual"}</button>
-        {inviteCode ? <span className="status-badge status-badge--neutral">Codigo {inviteCode}</span> : null}
       </div>
 
       <div className="mt-6 grid gap-4 md:grid-cols-3">
@@ -493,11 +480,11 @@ export function AdminAccessRosterImportPanel() {
         <div className="grid gap-6">
           <article className="role-card grid gap-4">
             <p className="text-sm uppercase tracking-[0.2em] text-slate-500">Plantilla esperada</p>
-            <p className="text-sm leading-7 text-slate-600">Columnas base: nombre, apellido, email, telefono, dni, unidad_funcional. Opcionales para residentes: es_menor, adulto_responsable_email.</p>
+            <p className="text-sm leading-7 text-slate-600">Columnas base: nombre, apellido, email, telefono, dni, unidad_funcional, puesto_vigilancia. Opcionales para residentes: es_menor, adulto_responsable_email.</p>
             <div className="overflow-hidden rounded-2xl border border-slate-200 bg-slate-50/90 p-4 text-sm text-slate-700">
-              <p>nombre,apellido,email,telefono,dni,unidad_funcional,es_menor,adulto_responsable_email</p>
-              <p>Ana,Perez,ana@example.com,11223344,30111222,UF-1A,,</p>
-              <p>Tomas,Perez,tomas@example.com,11223344,45111222,UF-1A,si,ana@example.com</p>
+              <p>nombre,apellido,email,telefono,dni,unidad_funcional,puesto_vigilancia,es_menor,adulto_responsable_email</p>
+              <p>Ana,Perez,ana@example.com,11223344,30111222,UF-1A,,,</p>
+              <p>Mario,Gomez,seguridad@example.com,11223344,28111222,,Acceso Norte,,</p>
             </div>
             <label>
               <span className="field-label">Archivo CSV</span>
@@ -510,7 +497,7 @@ export function AdminAccessRosterImportPanel() {
           <article className="role-card">
             <p className="text-sm uppercase tracking-[0.2em] text-slate-500">Vista previa</p>
             <div className="mt-4 grid gap-3">
-              {parsedRows.length === 0 ? <p className="text-sm leading-7 text-slate-600">Carga un CSV para revisar el padron antes de grabar.</p> : parsedRows.slice(0, 8).map((row) => <div className="rounded-2xl border border-slate-200 bg-white/80 p-4" key={`${row.email}-${row.lineNumber}`}><div className="flex items-start justify-between gap-3"><div><h4 className="text-lg font-semibold text-slate-950">{row.nombre} {row.apellido}</h4><p className="mt-1 text-sm leading-7 text-slate-600">{row.email}</p></div><span className={row.issues.length === 0 ? "status-badge status-badge--success" : "status-badge status-badge--warning"}>{row.issues.length === 0 ? "valida" : "revisar"}</span></div>{row.issues.length > 0 ? <p className="mt-3 text-sm leading-7 text-amber-700">{row.issues.join(" · ")}</p> : <p className="mt-3 text-sm leading-7 text-slate-600">Unidad {row.unidad_funcional ?? "-"} · DNI {row.dni ?? "-"}{row.es_menor ? ` · menor a cargo de ${row.adulto_responsable_email ?? "sin adulto"}` : ""}</p>}</div>)}
+              {parsedRows.length === 0 ? <p className="text-sm leading-7 text-slate-600">Carga un CSV para revisar el padron antes de grabar.</p> : parsedRows.slice(0, 8).map((row) => <div className="rounded-2xl border border-slate-200 bg-white/80 p-4" key={`${row.email}-${row.lineNumber}`}><div className="flex items-start justify-between gap-3"><div><h4 className="text-lg font-semibold text-slate-950">{row.nombre} {row.apellido}</h4><p className="mt-1 text-sm leading-7 text-slate-600">{row.email}</p></div><span className={row.issues.length === 0 ? "status-badge status-badge--success" : "status-badge status-badge--warning"}>{row.issues.length === 0 ? "valida" : "revisar"}</span></div>{row.issues.length > 0 ? <p className="mt-3 text-sm leading-7 text-amber-700">{row.issues.join(" · ")}</p> : <p className="mt-3 text-sm leading-7 text-slate-600">Unidad {row.unidad_funcional ?? "-"} · Puesto {row.puesto_vigilancia ?? "-"} · DNI {row.dni ?? "-"}{row.es_menor ? ` · menor a cargo de ${row.adulto_responsable_email ?? "sin adulto"}` : ""}</p>}</div>)}
             </div>
           </article>
         </div>
@@ -518,7 +505,7 @@ export function AdminAccessRosterImportPanel() {
         <article className="role-card">
           <p className="text-sm uppercase tracking-[0.2em] text-slate-500">Padron importado</p>
           <div className="mt-4 grid gap-3">
-            {loading ? <p className="text-sm leading-7 text-slate-600">Cargando padron.</p> : existingRows.length === 0 ? <p className="text-sm leading-7 text-slate-600">Todavia no hay registros importados para este rol.</p> : existingRows.map((row) => <div className="rounded-2xl border border-slate-200 bg-white/80 p-4" key={row.id}><div className="flex items-start justify-between gap-3"><div><h4 className="text-lg font-semibold text-slate-950">{row.nombre} {row.apellido}</h4><p className="mt-1 text-sm leading-7 text-slate-600">{row.email}</p></div><div className="flex flex-wrap items-center justify-end gap-2"><span className="status-badge status-badge--neutral">{row.rol_objetivo}</span>{row.es_menor ? <span className="status-badge status-badge--warning">menor</span> : null}<span className={getClaimStatusClass(row.estado_reclamo)}>{getClaimStatusLabel(row.estado_reclamo)}</span></div></div><div className="mt-3 flex flex-wrap gap-3 text-xs uppercase tracking-[0.18em] text-slate-400"><span>{row.telefono ?? "sin telefono"}</span><span>{row.dni ?? "sin dni"}</span><span>{row.unidad_funcional ?? "sin unidad"}</span>{row.adulto_responsable_email ? <span>adulto {row.adulto_responsable_email}</span> : null}</div><div className="mt-4 flex flex-wrap gap-3"><button className="button-secondary" onClick={() => void handleCopyInvite(row)} type="button">Copiar invitacion</button><button className="button-secondary" onClick={() => void handleShareInvite(row)} type="button">Compartir</button><a className="button-secondary" href={`mailto:${encodeURIComponent(row.email)}?subject=${encodeURIComponent("Invitacion Comunitaria")}&body=${encodeURIComponent(`Hola ${row.nombre}, este es tu enlace para completar el alta en Comunitaria: ${buildInviteUrl(row)}`)}`}>Email</a></div></div>)}
+            {loading ? <p className="text-sm leading-7 text-slate-600">Cargando padron.</p> : existingRows.length === 0 ? <p className="text-sm leading-7 text-slate-600">Todavia no hay registros importados para este rol.</p> : existingRows.map((row) => <div className="rounded-2xl border border-slate-200 bg-white/80 p-4" key={row.id}><div className="flex items-start justify-between gap-3"><div><h4 className="text-lg font-semibold text-slate-950">{row.nombre} {row.apellido}</h4><p className="mt-1 text-sm leading-7 text-slate-600">{row.email}</p></div><div className="flex flex-wrap items-center justify-end gap-2"><span className="status-badge status-badge--neutral">{row.rol_objetivo}</span>{row.es_menor ? <span className="status-badge status-badge--warning">menor</span> : null}<span className={getClaimStatusClass(row.estado_reclamo)}>{getClaimStatusLabel(row.estado_reclamo)}</span></div></div><div className="mt-3 flex flex-wrap gap-3 text-xs uppercase tracking-[0.18em] text-slate-400"><span>{row.telefono ?? "sin telefono"}</span><span>{row.dni ?? "sin dni"}</span><span>{row.unidad_funcional ?? row.puesto_vigilancia ?? "sin referencia"}</span>{row.codigo_acceso ? <span>codigo {row.codigo_acceso}</span> : null}{row.adulto_responsable_email ? <span>adulto {row.adulto_responsable_email}</span> : null}</div><div className="mt-4 text-sm leading-7 text-slate-600">{row.codigo_acceso_expires_at ? `Vence ${new Date(row.codigo_acceso_expires_at).toLocaleString()}` : "Sin vencimiento informado"}</div><div className="mt-4 flex flex-wrap gap-3"><button className="button-secondary" onClick={() => void handleCopyInvite(row)} type="button">Copiar invitacion</button><button className="button-secondary" onClick={() => void handleShareInvite(row)} type="button">Compartir</button><a className="button-secondary" href={`mailto:${encodeURIComponent(row.email)}?subject=${encodeURIComponent("Invitacion Comunitaria")}&body=${encodeURIComponent(`Hola ${row.nombre}, este es tu enlace para completar el alta en Comunitaria: ${buildInviteUrl(row)}`)}`}>Email</a></div></div>)}
           </div>
         </article>
       </div>

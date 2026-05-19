@@ -23,6 +23,10 @@ export type TenantRecord = {
   nombre: string;
   direccion: string;
   codigo_invitacion: string;
-  es_demo: boolean;
-  demo_unit_limit: number;
+  tipo: string;
+  tipo_otro: string | null;
+  trial_unit_limit: number;
+  trial_guard_post_limit: number;
+  contacto_email: string | null;
+  contacto_telefono: string | null;
 };

@@ -28,8 +28,8 @@ type ExistingUnit = {
 };
 
 type TenantLimit = {
-  es_demo: boolean;
-  demo_unit_limit: number;
+  trial_unit_limit: number;
+  trial_guard_post_limit: number;
 };
 
 const TEMPLATE_HEADERS = [
@@ -159,7 +159,7 @@ export function AdminUnitImportPanel() {
         .limit(25),
       supabase
         .from("consorcios")
-        .select("es_demo, demo_unit_limit")
+        .select("trial_unit_limit, trial_guard_post_limit")
         .eq("id", consorcioId)
         .maybeSingle(),
     ]);
@@ -217,7 +217,7 @@ export function AdminUnitImportPanel() {
   const uniqueIncomingCodes = new Set(validRows.map((row) => row.codigo));
   const existingCodes = new Set(existingUnits.map((row) => row.codigo));
   const newCodesCount = Array.from(uniqueIncomingCodes).filter((code) => !existingCodes.has(code)).length;
-  const demoLimitReached = Boolean(tenantLimit?.es_demo && (existingUnits.length + newCodesCount) > (tenantLimit.demo_unit_limit || 3));
+  const trialLimitReached = Boolean(tenantLimit && (existingUnits.length + newCodesCount) > (tenantLimit.trial_unit_limit || 3));
 
   async function handleFileChange(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
@@ -260,8 +260,8 @@ export function AdminUnitImportPanel() {
     setError("");
     setMessage("");
 
-    if (demoLimitReached) {
-      setError(`El modo demo permite hasta ${tenantLimit?.demo_unit_limit ?? 3} unidades funcionales.`);
+    if (trialLimitReached) {
+      setError(`La prueba inicial permite hasta ${tenantLimit?.trial_unit_limit ?? 3} unidades funcionales.`);
       setImporting(false);
       return;
     }
@@ -363,7 +363,7 @@ export function AdminUnitImportPanel() {
         <p className="max-w-xl text-sm leading-7 text-slate-600">Carga o actualiza el padron base del consorcio usando upsert por codigo de unidad. Esto alimenta reservas, onboarding y datos operativos.</p>
       </div>
 
-      {tenantLimit?.es_demo ? <article className="role-card mt-6 border-emerald-200 bg-emerald-50/80"><p className="text-sm font-semibold text-emerald-700">Modo demo activo</p><p className="mt-2 text-sm leading-7 text-emerald-700">Puedes operar gratis hasta {tenantLimit.demo_unit_limit} unidades funcionales. Hoy tienes {existingUnits.length} cargadas.</p></article> : null}
+      {tenantLimit ? <article className="role-card mt-6 border-emerald-200 bg-emerald-50/80"><p className="text-sm font-semibold text-emerald-700">Prueba inicial activa</p><p className="mt-2 text-sm leading-7 text-emerald-700">Puedes operar hasta {tenantLimit.trial_unit_limit} unidades funcionales. Hoy tienes {existingUnits.length} cargadas.</p></article> : null}
 
       {error ? <article className="role-card mt-6 border-amber-200 bg-amber-50/80"><p className="text-sm font-semibold text-amber-700">Error</p><p className="mt-2 text-sm leading-7 text-amber-700">{error}</p></article> : null}
       {message ? <article className="role-card mt-6 border-emerald-200 bg-emerald-50/80"><p className="text-sm font-semibold text-emerald-700">Estado</p><p className="mt-2 text-sm leading-7 text-emerald-700">{message}</p></article> : null}
@@ -386,7 +386,7 @@ export function AdminUnitImportPanel() {
               <input accept=".csv,text/csv" className="field mt-2" onChange={handleFileChange} type="file" />
             </label>
             {fileName ? <p className="text-sm leading-7 text-slate-600">Archivo cargado: {fileName}</p> : null}
-            {tenantLimit?.es_demo ? <p className="text-sm leading-7 text-slate-600">Este tenant demo aceptara como maximo {tenantLimit.demo_unit_limit} unidades distintas. Nuevas unidades detectadas en esta carga: {newCodesCount}.</p> : null}
+            {tenantLimit ? <p className="text-sm leading-7 text-slate-600">Esta prueba acepta como maximo {tenantLimit.trial_unit_limit} unidades distintas. Nuevas unidades detectadas en esta carga: {newCodesCount}.</p> : null}
             <button className="button-primary" disabled={importing || validRows.length === 0} onClick={() => void handleImport()} type="button">{importing ? "Importando..." : `Importar ${validRows.length} filas validas`}</button>
           </article>
 

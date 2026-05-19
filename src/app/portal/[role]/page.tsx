@@ -22,26 +22,23 @@ import { ResidentVisitsPanel } from "@/components/resident-visits-panel";
 import { SecurityLiveOverview } from "@/components/security-live-overview";
 import { notFound } from "next/navigation";
 import { PortalShell } from "@/components/portal-shell";
-import {
-  demoRoles,
-  roleLabels,
-  type AppRole,
-  type DemoRole,
-} from "@/lib/domain";
+import { roleLabels, type AppRole } from "@/lib/domain";
 
 type RolePageProps = {
   params: Promise<{ role: string }>;
 };
 
+const portalRoles: AppRole[] = ["admin", "residente", "seguridad"];
+
 export function generateStaticParams() {
-  return demoRoles.map((role) => ({ role }));
+  return portalRoles.map((role) => ({ role }));
 }
 
 export default async function RolePortalPage({ params }: RolePageProps) {
   const { role } = await params;
   const isAdmin = role === "admin";
 
-  if (!demoRoles.includes(role as DemoRole)) {
+  if (!portalRoles.includes(role as AppRole)) {
     notFound();
   }
 

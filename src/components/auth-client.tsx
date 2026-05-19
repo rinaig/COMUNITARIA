@@ -1,69 +1,84 @@
 "use client";
 
 import Link from "next/link";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
 import type { Session, User } from "@supabase/supabase-js";
+import type { AppRole } from "@/lib/domain";
 import type { ProfileRecord, TenantRecord } from "@/lib/auth-types";
 import { getSupabaseBrowserClient, isSupabaseConfigured } from "@/lib/supabase";
 
-type AuthMode = "login" | "register";
-type AccountType = "residente" | "admin";
-type AdminOnboardingMode = "crear" | "sumarme" | "demo";
+type AuthView = "login" | "admin" | "access";
+type AccessRole = "admin" | "residente" | "seguridad";
+type TenantType = "edificio" | "barrio_privado" | "country" | "otro";
 
-const portalRouteByRole = {
+const portalRouteByRole: Record<AppRole, string> = {
   superadmin: "/portal/plataforma",
   admin: "/portal/admin",
   residente: "/portal/residente",
   seguridad: "/portal/seguridad",
-} as const;
+};
 
-const roleLabel = {
-  superadmin: "SuperAdmin",
+const roleLabel: Record<AppRole, string> = {
+  superadmin: "SuperUser",
   admin: "Administrador",
-  residente: "Residente",
+  residente: "Usuario",
   seguridad: "Seguridad",
-} as const;
+};
+
+function normalizeDni(value: string) {
+  return value.replace(/\D/g, "");
+}
+
+function isValidDni(value: string) {
+  return /^\d{7,8}$/.test(normalizeDni(value));
+}
+
+function isStrongPassword(value: string) {
+  return /[A-Z]/.test(value) && /[a-zA-Z]/.test(value) && /\d/.test(value) && /[^A-Za-z0-9]/.test(value) && value.length >= 8;
+}
+
+function resolveRoute(profile: ProfileRecord | null) {
+  if (!profile || profile.estado !== "activo") {
+    return null;
+  }
+
+  return portalRouteByRole[profile.rol];
+}
 
 export function AuthClient() {
   const supabase = useMemo(() => getSupabaseBrowserClient(), []);
-  const searchParams = useSearchParams();
-  const invitePrefill = useMemo(() => {
-    const inviteCode = searchParams.get("codigo")?.trim().toUpperCase() ?? "";
-    const accountTypeParam = searchParams.get("tipo");
-    const adminModeParam = searchParams.get("modo");
-
-    return {
-      inviteCode,
-      accountType: accountTypeParam === "admin" ? "admin" : "residente",
-      adminMode: adminModeParam === "sumarme" ? "sumarme" : adminModeParam === "demo" ? "demo" : "crear",
-      email: searchParams.get("email")?.trim().toLowerCase() ?? "",
-      unidad: searchParams.get("unidad")?.trim().toUpperCase() ?? "",
-      startInRegister: inviteCode.length > 0,
-    } as const;
-  }, [searchParams]);
   const configured = isSupabaseConfigured();
-  const [mode, setMode] = useState<AuthMode>(() => invitePrefill.startInRegister ? "register" : "login");
-  const [accountType, setAccountType] = useState<AccountType>(() => invitePrefill.accountType);
-  const [adminOnboardingMode, setAdminOnboardingMode] = useState<AdminOnboardingMode>(() => invitePrefill.adminMode);
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const prefillCode = searchParams.get("codigo")?.trim() ?? "";
+  const prefillEmail = searchParams.get("email")?.trim().toLowerCase() ?? "";
+  const prefillUnit = searchParams.get("unidad")?.trim().toUpperCase() ?? "";
+  const typeParam = searchParams.get("tipo")?.trim();
+  const prefillRole: AccessRole = typeParam === "admin" ? "admin" : typeParam === "seguridad" ? "seguridad" : "residente";
+
+  const [view, setView] = useState<AuthView>(() => (prefillCode ? "access" : "login"));
+  const [accessRole, setAccessRole] = useState<AccessRole>(prefillRole);
+  const [tenantType, setTenantType] = useState<TenantType>("edificio");
   const [session, setSession] = useState<Session | null>(null);
   const [profile, setProfile] = useState<ProfileRecord | null>(null);
   const [tenant, setTenant] = useState<TenantRecord | null>(null);
-  const [inviteCode, setInviteCode] = useState(() => invitePrefill.inviteCode);
-  const [email, setEmail] = useState(() => invitePrefill.email);
+  const [email, setEmail] = useState(prefillEmail);
   const [password, setPassword] = useState("");
   const [nombre, setNombre] = useState("");
   const [apellido, setApellido] = useState("");
   const [telefono, setTelefono] = useState("");
   const [dni, setDni] = useState("");
-  const [unidad, setUnidad] = useState(() => invitePrefill.unidad);
+  const [unidad, setUnidad] = useState(prefillUnit);
+  const [codigoAcceso, setCodigoAcceso] = useState(prefillCode);
   const [consorcioNombre, setConsorcioNombre] = useState("");
   const [consorcioDireccion, setConsorcioDireccion] = useState("");
-  const [cuit, setCuit] = useState("");
+  const [consorcioCuit, setConsorcioCuit] = useState("");
+  const [tipoOtro, setTipoOtro] = useState("");
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
-  const [loadingSession, setLoadingSession] = useState(() => configured);
+  const [loadingSession, setLoadingSession] = useState(configured && Boolean(supabase));
 
   const hydrateFormFromUser = useCallback((user: User) => {
     setEmail(user.email ?? "");
@@ -75,40 +90,49 @@ export function AuthClient() {
 
   const refreshProfile = useCallback(async (userId: string) => {
     if (!supabase) {
-      return;
+      return null;
     }
 
-    const { data, error: profileError } = await supabase
+    const { data: profileData, error: profileError } = await supabase
       .from("profiles")
-      .select("id, email, nombre, apellido, telefono, dni, unidad_funcional, rol, estado, consorcio_id")
+      .select("id, email, nombre, apellido, telefono, dni, unidad_funcional, es_menor, adulto_responsable_id, adulto_responsable_email, rol, estado, consorcio_id")
       .eq("id", userId)
       .maybeSingle();
 
     if (profileError) {
       setError(profileError.message);
-      return;
+      return null;
     }
 
-    setProfile((data as ProfileRecord | null) ?? null);
+    const nextProfile = (profileData as ProfileRecord | null) ?? null;
+    setProfile(nextProfile);
 
-    if (!data?.consorcio_id) {
+    if (!nextProfile?.consorcio_id) {
       setTenant(null);
-      return;
+      return nextProfile;
     }
 
     const { data: tenantData, error: tenantError } = await supabase
       .from("consorcios")
-      .select("id, nombre, direccion, codigo_invitacion, es_demo, demo_unit_limit")
-      .eq("id", data.consorcio_id)
+      .select("id, nombre, direccion, codigo_invitacion, tipo, tipo_otro, trial_unit_limit, trial_guard_post_limit, contacto_email, contacto_telefono")
+      .eq("id", nextProfile.consorcio_id)
       .maybeSingle();
 
     if (tenantError) {
       setError(tenantError.message);
-      return;
+      return nextProfile;
     }
 
     setTenant((tenantData as TenantRecord | null) ?? null);
+    return nextProfile;
   }, [supabase]);
+
+  const navigateIfReady = useCallback((nextProfile: ProfileRecord | null) => {
+    const route = resolveRoute(nextProfile);
+    if (route) {
+      router.push(route);
+    }
+  }, [router]);
 
   useEffect(() => {
     if (!supabase) {
@@ -132,7 +156,8 @@ export function AuthClient() {
 
       if (data.session?.user) {
         hydrateFormFromUser(data.session.user);
-        await refreshProfile(data.session.user.id);
+        const nextProfile = await refreshProfile(data.session.user.id);
+        navigateIfReady(nextProfile);
       }
 
       setLoadingSession(false);
@@ -145,6 +170,7 @@ export function AuthClient() {
     } = supabase.auth.onAuthStateChange((_, nextSession) => {
       setSession(nextSession);
       setError("");
+      setMessage("");
 
       if (!nextSession?.user) {
         setProfile(null);
@@ -154,7 +180,9 @@ export function AuthClient() {
       }
 
       hydrateFormFromUser(nextSession.user);
-      void refreshProfile(nextSession.user.id);
+      void refreshProfile(nextSession.user.id).then((nextProfile) => {
+        navigateIfReady(nextProfile);
+      });
       setLoadingSession(false);
     });
 
@@ -162,7 +190,61 @@ export function AuthClient() {
       ignore = true;
       subscription.unsubscribe();
     };
-  }, [hydrateFormFromUser, refreshProfile, supabase]);
+  }, [hydrateFormFromUser, navigateIfReady, refreshProfile, supabase]);
+
+  const ensureRegistrationData = useCallback(() => {
+    if (!nombre.trim() || !apellido.trim()) {
+      setError("Nombre y apellido son obligatorios.");
+      return false;
+    }
+
+    if (!isValidDni(dni)) {
+      setError("El DNI debe tener 7 u 8 digitos.");
+      return false;
+    }
+
+    if (!session?.user && !isStrongPassword(password)) {
+      setError("La contrasena debe tener al menos 8 caracteres, una mayuscula, un numero y un caracter especial.");
+      return false;
+    }
+
+    return true;
+  }, [apellido, dni, nombre, password, session?.user]);
+
+  async function ensureAuthenticatedUser() {
+    if (!supabase) {
+      return null;
+    }
+
+    if (session?.user) {
+      return session.user;
+    }
+
+    const { data, error: signUpError } = await supabase.auth.signUp({
+      email,
+      password,
+      options: {
+        data: {
+          nombre,
+          apellido,
+          telefono,
+          dni: normalizeDni(dni),
+        },
+      },
+    });
+
+    if (signUpError) {
+      setError(signUpError.message);
+      return null;
+    }
+
+    if (!data.session || !data.user) {
+      setMessage("La cuenta fue creada. Confirma el correo si tu proyecto lo requiere y luego inicia sesion para completar el alta.");
+      return null;
+    }
+
+    return data.user;
+  }
 
   async function handleLogin(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -175,43 +257,19 @@ export function AuthClient() {
     setError("");
     setMessage("");
 
-    const { error: signInError } = await supabase.auth.signInWithPassword({
-      email,
-      password,
-    });
+    const { error: signInError } = await supabase.auth.signInWithPassword({ email, password });
 
     if (signInError) {
       setError(signInError.message);
-    } else {
-      setMessage("Sesion iniciada correctamente.");
-    }
-
-    setBusy(false);
-  }
-
-  async function handleGoogleLogin() {
-    if (!supabase) {
+      setBusy(false);
       return;
     }
 
-    setBusy(true);
-    setError("");
-    setMessage("");
-
-    const { error: oauthError } = await supabase.auth.signInWithOAuth({
-      provider: "google",
-      options: {
-        redirectTo: window.location.href,
-      },
-    });
-
-    if (oauthError) {
-      setError(oauthError.message);
-      setBusy(false);
-    }
+    setMessage("Sesion iniciada correctamente.");
+    setBusy(false);
   }
 
-  async function handleRegister(event: FormEvent<HTMLFormElement>) {
+  async function handleAdminRegistration(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
     if (!supabase) {
@@ -222,45 +280,64 @@ export function AuthClient() {
     setError("");
     setMessage("");
 
-    const { data, error: signUpError } = await supabase.auth.signUp({
-      email,
-      password,
-      options: {
-        data: {
-          nombre,
-          apellido,
-          telefono,
-          dni,
-        },
-      },
+    if (!ensureRegistrationData()) {
+      setBusy(false);
+      return;
+    }
+
+    if (!consorcioNombre.trim() || !consorcioDireccion.trim()) {
+      setError("Nombre y direccion del consorcio son obligatorios.");
+      setBusy(false);
+      return;
+    }
+
+    if (tenantType === "otro" && !tipoOtro.trim()) {
+      setError("Debes indicar el tipo cuando eliges Otros.");
+      setBusy(false);
+      return;
+    }
+
+    const user = await ensureAuthenticatedUser();
+
+    if (!user) {
+      setBusy(false);
+      return;
+    }
+
+    const { data, error: rpcError } = await supabase.rpc("complete_admin_registration", {
+      p_nombre: nombre.trim(),
+      p_apellido: apellido.trim(),
+      p_telefono: telefono.trim(),
+      p_dni: normalizeDni(dni),
+      p_consorcio_nombre: consorcioNombre.trim(),
+      p_consorcio_direccion: consorcioDireccion.trim(),
+      p_cuit: consorcioCuit.trim() || null,
+      p_tipo: tenantType,
+      p_tipo_otro: tenantType === "otro" ? tipoOtro.trim() : null,
     });
 
-    if (signUpError) {
-      setError(signUpError.message);
+    if (rpcError) {
+      setError(rpcError.message);
       setBusy(false);
       return;
     }
 
-    if (!data.session || !data.user) {
-      setMessage(
-        "Cuenta creada. Si en Supabase esta activa la confirmacion por email, confirma el correo y volve luego para completar el onboarding.",
-      );
-      setBusy(false);
-      return;
-    }
+    const result = Array.isArray(data) ? data[0] : null;
+    setMessage(
+      result?.codigo_invitacion
+        ? `Alta completada. Codigo principal del consorcio: ${result.codigo_invitacion}. Tenes 30 dias de prueba.`
+        : "Alta completada. Ya podes operar con tu prueba inicial.",
+    );
 
-    await completeOnboarding(data.user);
+    const nextProfile = await refreshProfile(user.id);
+    navigateIfReady(nextProfile);
     setBusy(false);
   }
 
-  async function completeOnboarding(user?: User) {
-    if (!supabase || !(user ?? session?.user)) {
-      return;
-    }
+  async function handleAccessActivation(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
 
-    const currentUser = user ?? session?.user;
-
-    if (!currentUser) {
+    if (!supabase) {
       return;
     }
 
@@ -268,91 +345,49 @@ export function AuthClient() {
     setError("");
     setMessage("");
 
-    if (accountType === "admin") {
-      if (adminOnboardingMode === "crear") {
-        const { data, error: rpcError } = await supabase.rpc("complete_admin_onboarding", {
-          p_nombre: nombre,
-          p_apellido: apellido,
-          p_telefono: telefono,
-          p_dni: dni,
-          p_consorcio_nombre: consorcioNombre,
-          p_consorcio_direccion: consorcioDireccion,
-          p_cuit: cuit,
-        });
-
-        if (rpcError) {
-          setError(rpcError.message);
-          setBusy(false);
-          return;
-        }
-
-        const nextCode = Array.isArray(data) ? data[0]?.codigo_invitacion : undefined;
-
-        setMessage(
-          nextCode
-            ? `Consorcio creado. Tu codigo de invitacion es ${nextCode}.`
-            : "Consorcio creado correctamente.",
-        );
-      } else if (adminOnboardingMode === "demo") {
-        const { data, error: rpcError } = await supabase.rpc("complete_demo_onboarding", {
-          p_nombre: nombre,
-          p_apellido: apellido,
-          p_telefono: telefono,
-          p_dni: dni,
-          p_consorcio_nombre: consorcioNombre,
-          p_consorcio_direccion: consorcioDireccion || "Modo demo Comunitaria",
-          p_cuit: cuit,
-        });
-
-        if (rpcError) {
-          setError(rpcError.message);
-          setBusy(false);
-          return;
-        }
-
-        const nextCode = Array.isArray(data) ? data[0]?.codigo_invitacion : undefined;
-        setMessage(
-          nextCode
-            ? `Modo demo creado. Ya puedes operar gratis hasta 3 unidades. Codigo demo ${nextCode}.`
-            : "Modo demo creado correctamente.",
-        );
-      } else {
-        const { error: rpcError } = await supabase.rpc("request_admin_access", {
-          p_nombre: nombre,
-          p_apellido: apellido,
-          p_telefono: telefono,
-          p_dni: dni,
-          p_codigo_invitacion: inviteCode,
-        });
-
-        if (rpcError) {
-          setError(rpcError.message);
-          setBusy(false);
-          return;
-        }
-
-        setMessage("Solicitud administrativa enviada. Queda pendiente de aprobacion del consorcio.");
-      }
-    } else {
-      const { error: rpcError } = await supabase.rpc("request_resident_access", {
-        p_nombre: nombre,
-        p_apellido: apellido,
-        p_telefono: telefono,
-        p_dni: dni,
-        p_unidad_funcional: unidad,
-        p_codigo_invitacion: inviteCode,
-      });
-
-      if (rpcError) {
-        setError(rpcError.message);
-        setBusy(false);
-        return;
-      }
-
-      setMessage("Solicitud enviada al administrador. Tu acceso queda pendiente de aprobacion.");
+    if (!codigoAcceso.trim()) {
+      setError("El codigo de acceso es obligatorio.");
+      setBusy(false);
+      return;
     }
 
-    await refreshProfile(currentUser.id);
+    if (!ensureRegistrationData()) {
+      setBusy(false);
+      return;
+    }
+
+    if (accessRole === "residente" && !unidad.trim()) {
+      setError("La unidad funcional es obligatoria para residentes.");
+      setBusy(false);
+      return;
+    }
+
+    const user = await ensureAuthenticatedUser();
+
+    if (!user) {
+      setBusy(false);
+      return;
+    }
+
+    const { error: rpcError } = await supabase.rpc("activate_access_with_code", {
+      p_codigo: codigoAcceso.trim(),
+      p_rol_esperado: accessRole,
+      p_nombre: nombre.trim(),
+      p_apellido: apellido.trim(),
+      p_telefono: telefono.trim() || null,
+      p_dni: normalizeDni(dni),
+      p_unidad_funcional: accessRole === "residente" ? unidad.trim().toUpperCase() : null,
+    });
+
+    if (rpcError) {
+      setError(rpcError.message);
+      setBusy(false);
+      return;
+    }
+
+    setMessage("Acceso activado correctamente.");
+    const nextProfile = await refreshProfile(user.id);
+    navigateIfReady(nextProfile);
     setBusy(false);
   }
 
@@ -368,31 +403,33 @@ export function AuthClient() {
     setBusy(false);
   }
 
-  const profileNeedsOnboarding = Boolean(session?.user) && (!profile?.consorcio_id || !profile?.nombre || !profile?.apellido);
+  const profileReady = Boolean(
+    profile && profile.estado === "activo" && (profile.rol === "superadmin" || (profile.consorcio_id && profile.nombre && profile.apellido)),
+  );
+  const sessionNeedsSetup = Boolean(session?.user) && !profileReady;
+  const activeRoute = resolveRoute(profile);
 
   return (
     <main className="flex min-h-screen flex-1 items-center justify-center bg-[radial-gradient(circle_at_top_right,_rgba(30,58,138,0.18),_transparent_28%),linear-gradient(180deg,_#eff6ff_0%,_#f3f4f6_48%,_#ffffff_100%)] px-6 py-10">
       <div className="mx-auto grid w-full max-w-7xl gap-6 lg:grid-cols-[0.9fr_1.1fr]">
         <section className="glass-panel rounded-[2rem] p-8 lg:p-10">
           <p className="text-xs uppercase tracking-[0.28em] text-slate-500">
-            Auth y onboarding
+            Acceso productivo
           </p>
           <h1 className="mt-4 text-4xl font-semibold tracking-[-0.05em] text-slate-950">
-            Acceso real con Supabase para cada consorcio.
+            Ingreso simple para administradores, usuarios y seguridad.
           </h1>
           <p className="mt-4 max-w-xl text-base leading-8 text-slate-600">
-            Email, Google y alta por codigo de invitacion o por creacion de nuevo consorcio. Ahora tambien cubre administradores importados que se suman a un consorcio existente.
+            El administrador crea su consorcio y recibe prueba real por 30 dias. Los demas perfiles entran con codigo unico emitido por la administracion.
           </p>
 
           <div className="mt-8 grid gap-4">
             <article className="role-card">
-              <p className="text-sm font-semibold text-slate-500">Que hace este modulo</p>
+              <p className="text-sm font-semibold text-slate-500">Como funciona</p>
               <ul className="mt-3 grid gap-3 text-sm leading-7 text-slate-700">
-                <li>Crea usuarios en Supabase Auth con email y password.</li>
-                <li>Permite login con Google OAuth.</li>
-                <li>Crea el perfil del usuario automaticamente al alta.</li>
-                <li>Asigna un administrador a un nuevo consorcio o vincula administradores importados a un consorcio existente.</li>
-                <li>Deja pendientes las altas para aprobacion cuando el flujo lo requiere.</li>
+                <li>Administrador: alta directa del consorcio con prueba inicial y limites operativos.</li>
+                <li>Usuario o seguridad: activacion con mail y codigo valido por 48 horas.</li>
+                <li>Los errores de rol se informan en el alta para evitar accesos al flujo equivocado.</li>
               </ul>
             </article>
 
@@ -404,11 +441,11 @@ export function AuthClient() {
                 </span>
               </div>
               <p className="mt-3 text-sm leading-7 text-slate-600">
-                Cargar NEXT_PUBLIC_SUPABASE_URL y NEXT_PUBLIC_SUPABASE_ANON_KEY en .env.local y habilitar Email + Google en Supabase Authentication.
+                Cargar NEXT_PUBLIC_SUPABASE_URL y NEXT_PUBLIC_SUPABASE_ANON_KEY en .env.local para usar el acceso real.
               </p>
-              {inviteCode ? (
+              {codigoAcceso ? (
                 <p className="mt-3 text-sm leading-7 text-slate-700">
-                  Invitacion detectada para el codigo {inviteCode}. El formulario ya quedo preconfigurado para continuar el alta.
+                  Codigo detectado: {codigoAcceso}. El formulario de activacion ya quedo preparado.
                 </p>
               ) : null}
             </article>
@@ -416,9 +453,6 @@ export function AuthClient() {
             <div className="flex flex-wrap gap-3 pt-2">
               <Link className="button-secondary" href="/">
                 Volver al inicio
-              </Link>
-              <Link className="button-secondary" href="/portal">
-                Ver portal demo
               </Link>
             </div>
           </div>
@@ -429,14 +463,14 @@ export function AuthClient() {
             <div className="role-card">
               <p className="text-sm font-semibold text-slate-500">Verificando sesion</p>
               <p className="mt-3 text-base leading-7 text-slate-700">
-                Cargando estado de autenticacion y perfil del usuario.
+                Cargando autenticacion y perfil actual.
               </p>
             </div>
           ) : !configured ? (
             <div className="role-card">
               <p className="text-sm font-semibold text-slate-500">Configuracion pendiente</p>
               <p className="mt-3 text-base leading-7 text-slate-700">
-                El flujo ya esta implementado, pero necesita credenciales reales de Supabase para funcionar.
+                La interfaz ya esta preparada, pero necesita variables reales de Supabase para operar.
               </p>
             </div>
           ) : session?.user ? (
@@ -448,9 +482,7 @@ export function AuthClient() {
                     <h2 className="mt-2 text-3xl font-semibold text-slate-950">
                       {profile?.nombre || nombre || "Usuario"} {profile?.apellido || apellido || ""}
                     </h2>
-                    <p className="mt-2 text-sm leading-7 text-slate-600">
-                      {session.user.email}
-                    </p>
+                    <p className="mt-2 text-sm leading-7 text-slate-600">{session.user.email}</p>
                   </div>
                   <div className="flex items-center gap-3">
                     <span className={`status-badge ${profile?.estado === "activo" ? "status-badge--success" : "status-badge--warning"}`}>
@@ -463,112 +495,96 @@ export function AuthClient() {
                 </div>
               </article>
 
-              {profileNeedsOnboarding ? (
-                <article className="role-card">
+              {sessionNeedsSetup ? (
+                <>
                   <div className="flex flex-wrap gap-3">
-                    <button
-                      className={accountType === "residente" ? "button-primary" : "button-secondary"}
-                      onClick={() => setAccountType("residente")}
-                      type="button"
-                    >
-                      Soy residente
+                    <button className={view === "admin" ? "button-primary" : "button-secondary"} onClick={() => setView("admin")} type="button">
+                      Alta de administrador
                     </button>
-                    <button
-                      className={accountType === "admin" ? "button-primary" : "button-secondary"}
-                      onClick={() => {
-                        setAccountType("admin");
-                        setAdminOnboardingMode("crear");
-                      }}
-                      type="button"
-                    >
-                      Soy administrador
+                    <button className={view === "access" ? "button-primary" : "button-secondary"} onClick={() => setView("access")} type="button">
+                      Activar con codigo
                     </button>
                   </div>
 
-                  {accountType === "admin" ? (
-                    <div className="mt-6 flex flex-wrap gap-3">
-                      <button
-                        className={adminOnboardingMode === "crear" ? "button-primary" : "button-secondary"}
-                        onClick={() => setAdminOnboardingMode("crear")}
-                        type="button"
-                      >
-                        Crear consorcio
-                      </button>
-                      <button
-                        className={adminOnboardingMode === "demo" ? "button-primary" : "button-secondary"}
-                        onClick={() => setAdminOnboardingMode("demo")}
-                        type="button"
-                      >
-                        Probar gratis modo demo
-                      </button>
-                      <button
-                        className={adminOnboardingMode === "sumarme" ? "button-primary" : "button-secondary"}
-                        onClick={() => setAdminOnboardingMode("sumarme")}
-                        type="button"
-                      >
-                        Sumarme a un consorcio existente
-                      </button>
-                    </div>
-                  ) : null}
-
-                  <div className="mt-6 grid gap-4 md:grid-cols-2">
-                    <label>
-                      <span className="field-label">Nombre</span>
-                      <input className="field mt-2" onChange={(event) => setNombre(event.target.value)} value={nombre} />
-                    </label>
-                    <label>
-                      <span className="field-label">Apellido</span>
-                      <input className="field mt-2" onChange={(event) => setApellido(event.target.value)} value={apellido} />
-                    </label>
-                    <label>
-                      <span className="field-label">Telefono</span>
-                      <input className="field mt-2" onChange={(event) => setTelefono(event.target.value)} value={telefono} />
-                    </label>
-                    <label>
-                      <span className="field-label">DNI</span>
-                      <input className="field mt-2" onChange={(event) => setDni(event.target.value)} value={dni} />
-                    </label>
-
-                    {accountType === "admin" && (adminOnboardingMode === "crear" || adminOnboardingMode === "demo") ? (
-                      <>
+                  {view === "admin" ? (
+                    <form className="grid gap-4" onSubmit={handleAdminRegistration}>
+                      <div className="grid gap-4 md:grid-cols-2">
                         <label>
-                          <span className="field-label">{adminOnboardingMode === "demo" ? "Nombre del espacio demo" : "Nombre del consorcio"}</span>
-                          <input className="field mt-2" onChange={(event) => setConsorcioNombre(event.target.value)} value={consorcioNombre} />
+                          <span className="field-label">Nombre</span>
+                          <input className="field mt-2" onChange={(event) => setNombre(event.target.value)} required value={nombre} />
                         </label>
                         <label>
-                          <span className="field-label">{adminOnboardingMode === "demo" ? "Descripcion corta" : "Direccion"}</span>
-                          <input className="field mt-2" onChange={(event) => setConsorcioDireccion(event.target.value)} value={consorcioDireccion} />
+                          <span className="field-label">Apellido</span>
+                          <input className="field mt-2" onChange={(event) => setApellido(event.target.value)} required value={apellido} />
                         </label>
-                        <label className="md:col-span-2">
+                        <label>
+                          <span className="field-label">Telefono</span>
+                          <input className="field mt-2" onChange={(event) => setTelefono(event.target.value)} value={telefono} />
+                        </label>
+                        <label>
+                          <span className="field-label">DNI</span>
+                          <input className="field mt-2" onChange={(event) => setDni(normalizeDni(event.target.value))} required value={dni} />
+                        </label>
+                        <label>
+                          <span className="field-label">Nombre del consorcio</span>
+                          <input className="field mt-2" onChange={(event) => setConsorcioNombre(event.target.value)} required value={consorcioNombre} />
+                        </label>
+                        <label>
+                          <span className="field-label">Direccion</span>
+                          <input className="field mt-2" onChange={(event) => setConsorcioDireccion(event.target.value)} required value={consorcioDireccion} />
+                        </label>
+                        <label>
+                          <span className="field-label">Tipo</span>
+                          <select className="field mt-2" onChange={(event) => setTenantType(event.target.value as TenantType)} value={tenantType}>
+                            <option value="edificio">Edificio</option>
+                            <option value="barrio_privado">Barrio privado</option>
+                            <option value="country">Country</option>
+                            <option value="otro">Otro</option>
+                          </select>
+                        </label>
+                        <label>
                           <span className="field-label">CUIT</span>
-                          <input className="field mt-2" onChange={(event) => setCuit(event.target.value)} value={cuit} />
+                          <input className="field mt-2" onChange={(event) => setConsorcioCuit(event.target.value)} value={consorcioCuit} />
                         </label>
-                      </>
-                    ) : accountType === "admin" ? (
-                      <label className="md:col-span-2">
-                        <span className="field-label">Codigo de consorcio</span>
-                        <input className="field mt-2 uppercase" onChange={(event) => setInviteCode(event.target.value.toUpperCase())} value={inviteCode} />
-                      </label>
-                    ) : (
-                      <>
+                        {tenantType === "otro" ? (
+                          <label className="md:col-span-2">
+                            <span className="field-label">Tipo personalizado</span>
+                            <input className="field mt-2" onChange={(event) => setTipoOtro(event.target.value)} required value={tipoOtro} />
+                          </label>
+                        ) : null}
+                      </div>
+
+                      <button className="button-primary" disabled={busy} type="submit">
+                        {busy ? "Guardando..." : "Completar alta administrativa"}
+                      </button>
+                    </form>
+                  ) : (
+                    <form className="grid gap-4" onSubmit={handleAccessActivation}>
+                      <div className="flex flex-wrap gap-3">
+                        {(["admin", "residente", "seguridad"] as AccessRole[]).map((role) => (
+                          <button className={accessRole === role ? "button-primary" : "button-secondary"} key={role} onClick={() => setAccessRole(role)} type="button">
+                            {roleLabel[role]}
+                          </button>
+                        ))}
+                      </div>
+
+                      <div className="grid gap-4 md:grid-cols-2">
                         <label>
-                          <span className="field-label">Codigo de consorcio</span>
-                          <input className="field mt-2 uppercase" onChange={(event) => setInviteCode(event.target.value.toUpperCase())} value={inviteCode} />
+                          <span className="field-label">Codigo de acceso</span>
+                          <input className="field mt-2 uppercase" onChange={(event) => setCodigoAcceso(event.target.value.toUpperCase())} required value={codigoAcceso} />
                         </label>
                         <label>
                           <span className="field-label">Unidad funcional</span>
-                          <input className="field mt-2 uppercase" onChange={(event) => setUnidad(event.target.value.toUpperCase())} value={unidad} />
+                          <input className="field mt-2 uppercase" disabled={accessRole !== "residente"} onChange={(event) => setUnidad(event.target.value.toUpperCase())} required={accessRole === "residente"} value={unidad} />
                         </label>
-                      </>
-                    )}
-                  </div>
+                      </div>
 
-                  <div className="mt-6">
-                    <button className="button-primary" disabled={busy} onClick={() => void completeOnboarding()} type="button">
-                      {busy ? "Guardando..." : accountType === "admin" && adminOnboardingMode === "sumarme" ? "Solicitar acceso como administrador" : accountType === "admin" && adminOnboardingMode === "demo" ? "Activar demo ahora" : accountType === "admin" ? "Crear consorcio ahora" : "Unirme ahora"}
-                    </button>
-                  </div>
-                </article>
+                      <button className="button-primary" disabled={busy} type="submit">
+                        {busy ? "Activando..." : "Activar acceso"}
+                      </button>
+                    </form>
+                  )}
+                </>
               ) : (
                 <article className="role-card">
                   <p className="text-sm font-semibold text-slate-500">Perfil vinculado</p>
@@ -582,35 +598,31 @@ export function AuthClient() {
                     <div>
                       <p className="text-sm uppercase tracking-[0.18em] text-slate-500">Consorcio</p>
                       <p className="mt-2 text-xl font-semibold text-slate-950">
-                        {tenant?.nombre ?? "Pendiente"}
+                        {tenant?.nombre ?? (profile?.rol === "superadmin" ? "Plataforma" : "Pendiente")}
                       </p>
-                      {tenant?.es_demo ? <p className="mt-2 text-sm leading-7 text-emerald-700">Tenant demo activo · limite {tenant.demo_unit_limit} unidades funcionales.</p> : null}
                     </div>
                     <div>
                       <p className="text-sm uppercase tracking-[0.18em] text-slate-500">Direccion</p>
-                      <p className="mt-2 text-base text-slate-700">{tenant?.direccion ?? "Sin asignar"}</p>
+                      <p className="mt-2 text-base text-slate-700">
+                        {tenant?.direccion ?? (profile?.rol === "superadmin" ? "Acceso interno oculto" : "Sin asignar")}
+                      </p>
                     </div>
                     <div>
                       <p className="text-sm uppercase tracking-[0.18em] text-slate-500">Codigo</p>
                       <p className="mt-2 text-base font-semibold text-slate-900">
-                        {tenant?.codigo_invitacion ?? "Sin codigo"}
+                        {tenant?.codigo_invitacion ?? "No aplica"}
                       </p>
                     </div>
                   </div>
 
                   <div className="mt-6 flex flex-wrap gap-3">
-                    {profile?.estado === "activo" ? (
-                      <Link className="button-primary" href={portalRouteByRole[profile.rol]}>
-                        Abrir portal {roleLabel[profile.rol]}
+                    {activeRoute ? (
+                      <Link className="button-primary" href={activeRoute}>
+                        Abrir portal {profile ? roleLabel[profile.rol] : ""}
                       </Link>
                     ) : (
-                      <span className="status-badge status-badge--warning">
-                        Esperando aprobacion del administrador
-                      </span>
+                      <span className="status-badge status-badge--warning">Falta completar vinculacion</span>
                     )}
-                    <Link className="button-secondary" href="/portal">
-                      Ver demo funcional
-                    </Link>
                   </div>
                 </article>
               )}
@@ -632,23 +644,18 @@ export function AuthClient() {
           ) : (
             <div className="grid gap-5">
               <div className="flex flex-wrap gap-3">
-                <button
-                  className={mode === "login" ? "button-primary" : "button-secondary"}
-                  onClick={() => setMode("login")}
-                  type="button"
-                >
+                <button className={view === "login" ? "button-primary" : "button-secondary"} onClick={() => setView("login")} type="button">
                   Ingresar
                 </button>
-                <button
-                  className={mode === "register" ? "button-primary" : "button-secondary"}
-                  onClick={() => setMode("register")}
-                  type="button"
-                >
-                  Crear cuenta
+                <button className={view === "admin" ? "button-primary" : "button-secondary"} onClick={() => setView("admin")} type="button">
+                  Alta administrador
+                </button>
+                <button className={view === "access" ? "button-primary" : "button-secondary"} onClick={() => setView("access")} type="button">
+                  Activar acceso
                 </button>
               </div>
 
-              {mode === "login" ? (
+              {view === "login" ? (
                 <form className="grid gap-4" onSubmit={handleLogin}>
                   <label>
                     <span className="field-label">Email</span>
@@ -659,32 +666,78 @@ export function AuthClient() {
                     <input className="field mt-2" onChange={(event) => setPassword(event.target.value)} required type="password" value={password} />
                   </label>
 
-                  <div className="flex flex-wrap gap-3 pt-2">
-                    <button className="button-primary" disabled={busy} type="submit">
-                      {busy ? "Ingresando..." : "Ingresar"}
-                    </button>
-                    <button className="button-secondary" disabled={busy} onClick={() => void handleGoogleLogin()} type="button">
-                      Continuar con Google
-                    </button>
+                  <button className="button-primary" disabled={busy} type="submit">
+                    {busy ? "Ingresando..." : "Ingresar"}
+                  </button>
+                </form>
+              ) : view === "admin" ? (
+                <form className="grid gap-4" onSubmit={handleAdminRegistration}>
+                  <div className="grid gap-4 md:grid-cols-2">
+                    <label>
+                      <span className="field-label">Nombre</span>
+                      <input className="field mt-2" onChange={(event) => setNombre(event.target.value)} required value={nombre} />
+                    </label>
+                    <label>
+                      <span className="field-label">Apellido</span>
+                      <input className="field mt-2" onChange={(event) => setApellido(event.target.value)} required value={apellido} />
+                    </label>
+                    <label>
+                      <span className="field-label">Telefono</span>
+                      <input className="field mt-2" onChange={(event) => setTelefono(event.target.value)} value={telefono} />
+                    </label>
+                    <label>
+                      <span className="field-label">DNI</span>
+                      <input className="field mt-2" onChange={(event) => setDni(normalizeDni(event.target.value))} required value={dni} />
+                    </label>
+                    <label>
+                      <span className="field-label">Email</span>
+                      <input className="field mt-2" onChange={(event) => setEmail(event.target.value)} required type="email" value={email} />
+                    </label>
+                    <label>
+                      <span className="field-label">Contrasena</span>
+                      <input className="field mt-2" onChange={(event) => setPassword(event.target.value)} required type="password" value={password} />
+                    </label>
+                    <label>
+                      <span className="field-label">Nombre del consorcio</span>
+                      <input className="field mt-2" onChange={(event) => setConsorcioNombre(event.target.value)} required value={consorcioNombre} />
+                    </label>
+                    <label>
+                      <span className="field-label">Direccion</span>
+                      <input className="field mt-2" onChange={(event) => setConsorcioDireccion(event.target.value)} required value={consorcioDireccion} />
+                    </label>
+                    <label>
+                      <span className="field-label">Tipo</span>
+                      <select className="field mt-2" onChange={(event) => setTenantType(event.target.value as TenantType)} value={tenantType}>
+                        <option value="edificio">Edificio</option>
+                        <option value="barrio_privado">Barrio privado</option>
+                        <option value="country">Country</option>
+                        <option value="otro">Otro</option>
+                      </select>
+                    </label>
+                    <label>
+                      <span className="field-label">CUIT</span>
+                      <input className="field mt-2" onChange={(event) => setConsorcioCuit(event.target.value)} value={consorcioCuit} />
+                    </label>
+                    {tenantType === "otro" ? (
+                      <label className="md:col-span-2">
+                        <span className="field-label">Tipo personalizado</span>
+                        <input className="field mt-2" onChange={(event) => setTipoOtro(event.target.value)} required value={tipoOtro} />
+                      </label>
+                    ) : null}
                   </div>
+
+                  <button className="button-primary" disabled={busy} type="submit">
+                    {busy ? "Creando..." : "Crear cuenta y consorcio"}
+                  </button>
                 </form>
               ) : (
-                <form className="grid gap-4" onSubmit={handleRegister}>
+                <form className="grid gap-4" onSubmit={handleAccessActivation}>
                   <div className="flex flex-wrap gap-3">
-                    <button
-                      className={accountType === "residente" ? "button-primary" : "button-secondary"}
-                      onClick={() => setAccountType("residente")}
-                      type="button"
-                    >
-                      Cuenta de residente
-                    </button>
-                    <button
-                      className={accountType === "admin" ? "button-primary" : "button-secondary"}
-                      onClick={() => { setAccountType("admin"); setAdminOnboardingMode(invitePrefill.adminMode); }}
-                      type="button"
-                    >
-                      Cuenta de administrador
-                    </button>
+                    {(["admin", "residente", "seguridad"] as AccessRole[]).map((role) => (
+                      <button className={accessRole === role ? "button-primary" : "button-secondary"} key={role} onClick={() => setAccessRole(role)} type="button">
+                        {roleLabel[role]}
+                      </button>
+                    ))}
                   </div>
 
                   <div className="grid gap-4 md:grid-cols-2">
@@ -702,7 +755,7 @@ export function AuthClient() {
                     </label>
                     <label>
                       <span className="field-label">DNI</span>
-                      <input className="field mt-2" onChange={(event) => setDni(event.target.value)} value={dni} />
+                      <input className="field mt-2" onChange={(event) => setDni(normalizeDni(event.target.value))} required value={dni} />
                     </label>
                     <label>
                       <span className="field-label">Email</span>
@@ -710,60 +763,21 @@ export function AuthClient() {
                     </label>
                     <label>
                       <span className="field-label">Contrasena</span>
-                      <input className="field mt-2" minLength={6} onChange={(event) => setPassword(event.target.value)} required type="password" value={password} />
+                      <input className="field mt-2" onChange={(event) => setPassword(event.target.value)} required type="password" value={password} />
                     </label>
-
-                    {accountType === "admin" ? (
-                      <>
-                        <div className="md:col-span-2 flex flex-wrap gap-3">
-                          <button className={adminOnboardingMode === "demo" ? "button-primary" : "button-secondary"} onClick={() => setAdminOnboardingMode("demo")} type="button">Modo demo gratis</button>
-                          <button className={adminOnboardingMode === "crear" ? "button-primary" : "button-secondary"} onClick={() => setAdminOnboardingMode("crear")} type="button">Consorcio real</button>
-                          <button className={adminOnboardingMode === "sumarme" ? "button-primary" : "button-secondary"} onClick={() => setAdminOnboardingMode("sumarme")} type="button">Sumarme con codigo</button>
-                        </div>
-                        {adminOnboardingMode === "sumarme" ? (
-                          <label className="md:col-span-2">
-                            <span className="field-label">Codigo de consorcio</span>
-                            <input className="field mt-2 uppercase" onChange={(event) => setInviteCode(event.target.value.toUpperCase())} required value={inviteCode} />
-                          </label>
-                        ) : (
-                          <>
-                            <label>
-                              <span className="field-label">{adminOnboardingMode === "demo" ? "Nombre del espacio demo" : "Nombre del consorcio"}</span>
-                              <input className="field mt-2" onChange={(event) => setConsorcioNombre(event.target.value)} required value={consorcioNombre} />
-                            </label>
-                            <label>
-                              <span className="field-label">{adminOnboardingMode === "demo" ? "Descripcion corta" : "Direccion"}</span>
-                              <input className="field mt-2" onChange={(event) => setConsorcioDireccion(event.target.value)} required value={consorcioDireccion} />
-                            </label>
-                            <label className="md:col-span-2">
-                              <span className="field-label">CUIT</span>
-                              <input className="field mt-2" onChange={(event) => setCuit(event.target.value)} value={cuit} />
-                            </label>
-                          </>
-                        )}
-                      </>
-                    ) : (
-                      <>
-                        <label>
-                          <span className="field-label">Codigo de consorcio</span>
-                          <input className="field mt-2 uppercase" onChange={(event) => setInviteCode(event.target.value.toUpperCase())} required value={inviteCode} />
-                        </label>
-                        <label>
-                          <span className="field-label">Unidad funcional</span>
-                          <input className="field mt-2 uppercase" onChange={(event) => setUnidad(event.target.value.toUpperCase())} required value={unidad} />
-                        </label>
-                      </>
-                    )}
+                    <label>
+                      <span className="field-label">Codigo de acceso</span>
+                      <input className="field mt-2 uppercase" onChange={(event) => setCodigoAcceso(event.target.value.toUpperCase())} required value={codigoAcceso} />
+                    </label>
+                    <label>
+                      <span className="field-label">Unidad funcional</span>
+                      <input className="field mt-2 uppercase" disabled={accessRole !== "residente"} onChange={(event) => setUnidad(event.target.value.toUpperCase())} required={accessRole === "residente"} value={unidad} />
+                    </label>
                   </div>
 
-                  <div className="flex flex-wrap gap-3 pt-2">
-                    <button className="button-primary" disabled={busy} type="submit">
-                      {busy ? "Creando..." : accountType === "admin" && adminOnboardingMode === "demo" ? "Crear cuenta y activar demo" : accountType === "admin" && adminOnboardingMode === "crear" ? "Crear cuenta y consorcio" : accountType === "admin" ? "Crear cuenta y solicitar acceso" : "Crear cuenta y unirme"}
-                    </button>
-                    <button className="button-secondary" disabled={busy} onClick={() => void handleGoogleLogin()} type="button">
-                      Continuar con Google
-                    </button>
-                  </div>
+                  <button className="button-primary" disabled={busy} type="submit">
+                    {busy ? "Activando..." : "Crear cuenta y activar acceso"}
+                  </button>
                 </form>
               )}
 

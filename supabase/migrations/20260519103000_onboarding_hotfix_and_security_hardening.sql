@@ -24,6 +24,61 @@ begin
 end;
 $$;
 
+create or replace function public.ensure_profile_for_auth_user(
+  p_user_id uuid default auth.uid(),
+  p_email text default null,
+  p_nombre text default null,
+  p_apellido text default null,
+  p_telefono text default null,
+  p_dni text default null
+)
+returns uuid
+language plpgsql
+security definer
+set search_path = public, auth
+as $$
+declare
+  auth_user auth.users%rowtype;
+  resolved_email text;
+begin
+  if p_user_id is null then
+    raise exception 'Usuario no autenticado';
+  end if;
+
+  select *
+  into auth_user
+  from auth.users
+  where id = p_user_id;
+
+  resolved_email := lower(
+    coalesce(
+      nullif(trim(coalesce(p_email, '')), ''),
+      nullif(trim(coalesce(auth_user.email, '')), '')
+    )
+  );
+
+  insert into public.profiles (id, email, nombre, apellido, telefono, dni)
+  values (
+    p_user_id,
+    coalesce(resolved_email, ''),
+    trim(coalesce(p_nombre, auth_user.raw_user_meta_data ->> 'nombre', '')),
+    trim(coalesce(p_apellido, auth_user.raw_user_meta_data ->> 'apellido', '')),
+    nullif(trim(coalesce(p_telefono, auth_user.raw_user_meta_data ->> 'telefono', '')), ''),
+    nullif(trim(coalesce(p_dni, auth_user.raw_user_meta_data ->> 'dni', '')), '')
+  )
+  on conflict (id) do update
+  set
+    email = excluded.email,
+    nombre = case when trim(coalesce(excluded.nombre, '')) <> '' then excluded.nombre else public.profiles.nombre end,
+    apellido = case when trim(coalesce(excluded.apellido, '')) <> '' then excluded.apellido else public.profiles.apellido end,
+    telefono = coalesce(excluded.telefono, public.profiles.telefono),
+    dni = coalesce(excluded.dni, public.profiles.dni),
+    updated_at = timezone('utc', now());
+
+  return p_user_id;
+end;
+$$;
+
 create or replace function public.complete_admin_onboarding(
   p_nombre text,
   p_apellido text,
@@ -46,6 +101,8 @@ begin
   if current_user_id is null then
     raise exception 'Usuario no autenticado';
   end if;
+
+  perform public.ensure_profile_for_auth_user(current_user_id, null, p_nombre, p_apellido, p_telefono, p_dni);
 
   if coalesce(trim(p_consorcio_nombre), '') = '' then
     raise exception 'El nombre del consorcio es obligatorio';
@@ -107,6 +164,8 @@ begin
   if current_user_id is null then
     raise exception 'Usuario no autenticado';
   end if;
+
+  perform public.ensure_profile_for_auth_user(current_user_id, null, p_nombre, p_apellido, p_telefono, p_dni);
 
   if coalesce(trim(p_consorcio_nombre), '') = '' then
     raise exception 'El nombre del espacio demo es obligatorio';
