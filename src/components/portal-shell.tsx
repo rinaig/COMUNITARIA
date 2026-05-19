@@ -14,17 +14,14 @@ export function PortalShell({ role, children }: PortalShellProps) {
 
   return (
     <div className="min-h-screen bg-[linear-gradient(180deg,_#eff6ff_0%,_#f3f4f6_40%,_#ffffff_100%)] text-slate-950">
-      <div className="mx-auto flex min-h-screen w-full max-w-7xl flex-col px-6 py-6 lg:px-10 lg:py-8">
-        <header className="glass-panel flex flex-col gap-4 rounded-[2rem] px-6 py-5 lg:flex-row lg:items-center lg:justify-between">
+      <div className="flex min-h-screen w-full flex-col px-4 py-4 sm:px-6 lg:px-10 lg:py-8">
+        <header className="glass-panel relative z-30 flex flex-col gap-4 rounded-[2rem] px-5 py-5 lg:flex-row lg:items-center lg:justify-between lg:px-6">
           <PortalTenantSummary />
 
           <nav className="flex flex-wrap gap-3 text-sm font-medium">
             <PortalNotificationsPanel />
             <Link className="button-secondary" href="/">
               Inicio
-            </Link>
-            <Link className="button-secondary" href="/auth">
-              Mi acceso
             </Link>
             {role === "superadmin" ? (
               <Link className="button-primary" href="/portal/plataforma">

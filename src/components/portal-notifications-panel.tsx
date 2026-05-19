@@ -105,13 +105,13 @@ export function PortalNotificationsPanel() {
   }
 
   return (
-    <div className="relative">
+    <div className="relative z-40">
       <button className={open ? "button-primary" : "button-secondary"} onClick={() => setOpen((current) => !current)} type="button">
         Notificaciones {unreadCount > 0 ? `(${unreadCount})` : ""}
       </button>
 
       {open ? (
-        <div className="absolute right-0 top-[calc(100%+0.75rem)] z-20 w-[22rem] rounded-[1.75rem] border border-slate-200 bg-white/95 p-5 shadow-[0_24px_60px_rgba(15,23,42,0.14)] backdrop-blur">
+        <div className="fixed inset-x-4 top-24 z-50 rounded-[1.75rem] border border-slate-200 bg-white/95 p-5 shadow-[0_24px_60px_rgba(15,23,42,0.14)] backdrop-blur sm:absolute sm:inset-x-auto sm:right-0 sm:top-[calc(100%+0.75rem)] sm:w-[24rem]">
           <div className="flex items-center justify-between gap-3">
             <div>
               <p className="text-sm uppercase tracking-[0.2em] text-slate-500">Bandeja</p>
@@ -121,7 +121,7 @@ export function PortalNotificationsPanel() {
           </div>
 
           {error ? <p className="mt-4 text-sm leading-7 text-amber-700">{error}</p> : null}
-          <div className="mt-4 grid max-h-96 gap-3 overflow-y-auto pr-1">
+          <div className="mt-4 grid max-h-[min(70vh,32rem)] gap-3 overflow-y-auto pr-1">
             {loading ? <p className="text-sm leading-7 text-slate-600">Cargando notificaciones.</p> : notifications.length === 0 ? <p className="text-sm leading-7 text-slate-600">Todavia no hay eventos para mostrar.</p> : notifications.map((item) => <div className="rounded-2xl border border-slate-200 bg-slate-50/85 p-4" key={item.id}><div className="flex items-start justify-between gap-3"><h5 className="text-sm font-semibold text-slate-950">{item.titulo}</h5><span className={item.leida_at ? "status-badge status-badge--neutral" : "status-badge status-badge--warning"}>{item.leida_at ? "leida" : "nueva"}</span></div><p className="mt-2 text-sm leading-6 text-slate-600">{item.detalle}</p><p className="mt-2 text-xs uppercase tracking-[0.16em] text-slate-400">{item.categoria} · {new Date(item.created_at).toLocaleString("es-AR")}</p></div>)}
           </div>
         </div>

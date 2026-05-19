@@ -6,7 +6,7 @@ const profileCards = [
   {
     title: "Administrador",
     description: "Centraliza unidades, avisos, gastos, reservas y seguimiento operativo del consorcio desde un solo panel.",
-    image: "/media/modulo-expensas.png",
+    image: "/media/modulo-seguridad.png",
     alt: "Panel administrativo de expensas y control",
   },
   {
@@ -18,7 +18,7 @@ const profileCards = [
   {
     title: "Seguridad",
     description: "Gestiona accesos, visitas, controles documentales y validaciones diarias desde una vista rapida y operativa.",
-    image: "/media/modulo-seguridad.png",
+    image: "/media/modulo-expensas.png",
     alt: "Modulo de seguridad y accesos",
   },
 ];
@@ -33,7 +33,7 @@ const featureCards = [
   {
     title: "Transparencia en expensas",
     description: "Cada gasto se puede acompañar con comprobantes, estados y una vista comprensible para el vecino.",
-    image: "/media/modulo-expensas.png",
+    image: "/media/modulo-seguridad.png",
     alt: "Modulo de expensas y transparencia",
   },
   {

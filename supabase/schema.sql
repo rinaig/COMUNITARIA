@@ -3917,6 +3917,26 @@ for all
 using (public.is_superadmin())
 with check (public.is_superadmin());
 
+create policy "tenant_payment_events_select"
+on public.admin_payment_events
+for select
+using (
+  public.is_superadmin()
+  or (
+    consorcio_id = public.current_consorcio_id()
+    and public.current_role() = 'admin'
+  )
+);
+
+create policy "tenant_payment_events_insert"
+on public.admin_payment_events
+for insert
+with check (
+  consorcio_id = public.current_consorcio_id()
+  and public.current_role() = 'admin'
+  and registrado_por = auth.uid()
+);
+
 create policy "members_read_own_consorcio"
 on public.consorcios
 for select

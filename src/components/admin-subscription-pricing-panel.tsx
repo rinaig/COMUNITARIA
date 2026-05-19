@@ -13,6 +13,7 @@ type SubscriptionPricingRow = {
   consorcio_id: string;
   monto_mensual: number;
   precio_lista_por_unidad: number;
+  unit_price_override: number | null;
   modalidad_cobro: ChargeMode;
   valor_cobro: number;
   destino_cobro: ChargeTarget;
@@ -31,6 +32,16 @@ type UnitChargeRow = {
   comprobante_url: string | null;
   detalle: string | null;
   unidades_funcionales: { codigo: string } | { codigo: string }[] | null;
+};
+
+type PaymentEventRow = {
+  id: string;
+  importe: number;
+  estado: "pagado" | "pendiente" | "vencido" | "fallido";
+  fecha_pago: string | null;
+  referencia: string | null;
+  nota: string | null;
+  created_at: string;
 };
 
 type ConsorcioSummary = {
@@ -94,11 +105,17 @@ export function AdminSubscriptionPricingPanel() {
   const [message, setMessage] = useState("");
   const [consorcio, setConsorcio] = useState<ConsorcioSummary | null>(null);
   const [subscription, setSubscription] = useState<SubscriptionPricingRow | null>(null);
+  const [platformDefaultUnitPrice, setPlatformDefaultUnitPrice] = useState("0");
   const [unitPrice, setUnitPrice] = useState("0");
   const [chargeMode, setChargeMode] = useState<ChargeMode>("admin_absorbe");
   const [chargeValue, setChargeValue] = useState("0");
   const [chargeTarget, setChargeTarget] = useState<ChargeTarget>("propietario");
   const [notes, setNotes] = useState("");
+  const [transferEvents, setTransferEvents] = useState<PaymentEventRow[]>([]);
+  const [transferAmount, setTransferAmount] = useState("0");
+  const [transferDate, setTransferDate] = useState("");
+  const [transferReference, setTransferReference] = useState("");
+  const [transferNote, setTransferNote] = useState("");
   const [charges, setCharges] = useState<UnitChargeRow[]>([]);
   const [generationPeriod, setGenerationPeriod] = useState(() => getDefaultPeriod());
   const [generationDueDate, setGenerationDueDate] = useState("");
@@ -110,6 +127,7 @@ export function AdminSubscriptionPricingPanel() {
   const [generatingCharges, setGeneratingCharges] = useState(false);
   const [markingChargeId, setMarkingChargeId] = useState<string | null>(null);
   const [savingChargeId, setSavingChargeId] = useState<string | null>(null);
+  const [reportingTransfer, setReportingTransfer] = useState(false);
 
   const loadData = useCallback(async (userId: string) => {
     if (!supabase) {
@@ -120,13 +138,15 @@ export function AdminSubscriptionPricingPanel() {
     setError("");
 
     const consorcioId = await getCurrentConsorcioId(supabase, userId);
-    const [consorcioResult, subscriptionResult, chargesResult] = await Promise.all([
+    const [consorcioResult, settingsResult, subscriptionResult, transferEventsResult, chargesResult] = await Promise.all([
       supabase.from("consorcios").select("id, nombre, cantidad_unidades").eq("id", consorcioId).maybeSingle(),
-      supabase.from("consorcio_suscripciones").select("id, consorcio_id, monto_mensual, precio_lista_por_unidad, modalidad_cobro, valor_cobro, destino_cobro, observaciones").eq("consorcio_id", consorcioId).maybeSingle(),
+      supabase.from("platform_settings").select("default_unit_price").eq("id", true).maybeSingle(),
+      supabase.from("consorcio_suscripciones").select("id, consorcio_id, monto_mensual, precio_lista_por_unidad, unit_price_override, modalidad_cobro, valor_cobro, destino_cobro, observaciones").eq("consorcio_id", consorcioId).maybeSingle(),
+      supabase.from("admin_payment_events").select("id, importe, estado, fecha_pago, referencia, nota, created_at").eq("consorcio_id", consorcioId).order("created_at", { ascending: false }).limit(6),
       supabase.from("cargos_plataforma_unidad").select("id, periodo_referencia, destino_cobro, monto, estado, fecha_vencimiento, enlace_pago, referencia_pago, comprobante_url, detalle, unidades_funcionales(codigo)").order("created_at", { ascending: false }).limit(8),
     ]);
 
-    const firstError = consorcioResult.error ?? subscriptionResult.error ?? chargesResult.error;
+    const firstError = consorcioResult.error ?? settingsResult.error ?? subscriptionResult.error ?? transferEventsResult.error ?? chargesResult.error;
     if (firstError) {
       setError(firstError.message);
       setLoading(false);
@@ -135,14 +155,17 @@ export function AdminSubscriptionPricingPanel() {
 
     const nextConsorcio = (consorcioResult.data as ConsorcioSummary | null) ?? null;
     const nextSubscription = (subscriptionResult.data as SubscriptionPricingRow | null) ?? null;
+    const defaultUnitPrice = Number((settingsResult.data as { default_unit_price: number } | null)?.default_unit_price ?? 0);
 
     setConsorcio(nextConsorcio);
     setSubscription(nextSubscription);
-    setUnitPrice(String(nextSubscription?.precio_lista_por_unidad ?? 0));
+    setPlatformDefaultUnitPrice(String(defaultUnitPrice));
+    setUnitPrice(String(nextSubscription?.unit_price_override ?? nextSubscription?.precio_lista_por_unidad ?? defaultUnitPrice));
     setChargeMode(nextSubscription?.modalidad_cobro ?? "admin_absorbe");
     setChargeValue(String(nextSubscription?.valor_cobro ?? 0));
     setChargeTarget(nextSubscription?.destino_cobro ?? "propietario");
     setNotes(nextSubscription?.observaciones ?? "");
+    setTransferEvents((transferEventsResult.data as PaymentEventRow[] | null) ?? []);
     const nextCharges = (chargesResult.data as UnitChargeRow[] | null) ?? [];
     setCharges(nextCharges);
     setChargeLinks(Object.fromEntries(nextCharges.map((item) => [item.id, item.enlace_pago ?? ""])));
@@ -239,6 +262,43 @@ export function AdminSubscriptionPricingPanel() {
     setGeneratingCharges(false);
   }
 
+  async function handleReportTransfer(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    if (!supabase || !session?.user || !subscription) {
+      return;
+    }
+
+    setReportingTransfer(true);
+    setError("");
+    setMessage("");
+
+    const { error: reportError } = await supabase.from("admin_payment_events").insert({
+      consorcio_id: subscription.consorcio_id,
+      suscripcion_id: subscription.id,
+      importe: Number(transferAmount || 0),
+      estado: "pendiente",
+      metodo: "transferencia_admin",
+      referencia: transferReference || null,
+      fecha_pago: transferDate || null,
+      nota: transferNote || null,
+    });
+
+    if (reportError) {
+      setError(reportError.message);
+      setReportingTransfer(false);
+      return;
+    }
+
+    setTransferAmount(String(subscription.monto_mensual || 0));
+    setTransferDate("");
+    setTransferReference("");
+    setTransferNote("");
+    setMessage("Transferencia reportada al SuperUser.");
+    await loadData(session.user.id);
+    setReportingTransfer(false);
+  }
+
   async function handleSaveChargeCollection(chargeId: string) {
     if (!supabase || !session?.user) {
       return;
@@ -321,6 +381,7 @@ export function AdminSubscriptionPricingPanel() {
     ? {
         ...subscription,
         precio_lista_por_unidad: Number(unitPrice || subscription.precio_lista_por_unidad || 0),
+        unit_price_override: subscription.unit_price_override,
         modalidad_cobro: chargeMode,
         valor_cobro: Number(chargeValue || subscription.valor_cobro || 0),
         destino_cobro: chargeTarget,
@@ -331,6 +392,7 @@ export function AdminSubscriptionPricingPanel() {
         consorcio_id: consorcio?.id ?? "",
         monto_mensual: Number(unitPrice || 0) * Number(consorcio?.cantidad_unidades ?? 0),
         precio_lista_por_unidad: Number(unitPrice || 0),
+        unit_price_override: null,
         modalidad_cobro: chargeMode,
         valor_cobro: Number(chargeValue || 0),
         destino_cobro: chargeTarget,
@@ -349,7 +411,7 @@ export function AdminSubscriptionPricingPanel() {
           <p className="text-xs uppercase tracking-[0.28em] text-slate-500">Modelo comercial</p>
           <h3 className="mt-3 text-3xl font-semibold tracking-[-0.04em] text-slate-950">Como se reparte el costo de la plataforma</h3>
         </div>
-        <p className="max-w-xl text-sm leading-7 text-slate-600">Administracion puede absorber el servicio o trasladarlo como monto fijo o porcentaje por unidad a propietarios, inquilinos o ambos.</p>
+        <p className="max-w-xl text-sm leading-7 text-slate-600">El precio base lo define la plataforma. Desde aca solo definis como trasladarlo y reportas tus transferencias.</p>
       </div>
 
       {error ? <article className="role-card mt-6 border-amber-200 bg-amber-50/80"><p className="text-sm font-semibold text-amber-700">Error</p><p className="mt-2 text-sm leading-7 text-amber-700">{error}</p></article> : null}
@@ -359,7 +421,8 @@ export function AdminSubscriptionPricingPanel() {
         <form className="role-card grid gap-4" onSubmit={handleSubmit}>
           <label><span className="field-label">Consorcio</span><input className="field mt-2" disabled value={consorcio?.nombre ?? "Cargando"} /></label>
           <label><span className="field-label">Unidades funcionales</span><input className="field mt-2" disabled value={String(totalUnits)} /></label>
-          <label><span className="field-label">Precio de lista por unidad</span><input className="field mt-2" min="0" onChange={(event) => setUnitPrice(event.target.value)} required step="0.01" type="number" value={unitPrice} /></label>
+          <label><span className="field-label">Precio de lista por unidad</span><input className="field mt-2" disabled type="text" value={`$ ${Number(unitPrice || 0).toLocaleString("es-AR")}`} /></label>
+          <p className="text-xs uppercase tracking-[0.18em] text-slate-400">General plataforma: $ {Number(platformDefaultUnitPrice || 0).toLocaleString("es-AR")}{subscription?.unit_price_override != null ? ` · Especial activo: $ ${Number(subscription.unit_price_override).toLocaleString("es-AR")}` : ""}</p>
           <label><span className="field-label">Modalidad de cobro</span><select className="field-select mt-2" onChange={(event) => setChargeMode(event.target.value as ChargeMode)} value={chargeMode}><option value="admin_absorbe">Lo absorbe la administracion</option><option value="monto_fijo_por_unidad">Monto fijo por unidad</option><option value="porcentaje_por_unidad">Porcentaje sobre precio unitario</option></select></label>
           {chargeMode !== "admin_absorbe" ? <label><span className="field-label">{chargeMode === "porcentaje_por_unidad" ? "Porcentaje a cobrar" : "Monto a cobrar por unidad"}</span><input className="field mt-2" min="0" max={chargeMode === "porcentaje_por_unidad" ? "100" : undefined} onChange={(event) => setChargeValue(event.target.value)} required step="0.01" type="number" value={chargeValue} /></label> : null}
           <label><span className="field-label">Destino del cobro</span><select className="field-select mt-2" onChange={(event) => setChargeTarget(event.target.value as ChargeTarget)} value={chargeTarget}><option value="propietario">Propietarios</option><option value="inquilino">Inquilinos</option><option value="todos">Todos los ocupantes</option></select></label>
@@ -390,6 +453,24 @@ export function AdminSubscriptionPricingPanel() {
               <p className="mt-3 text-lg font-semibold text-slate-950">{chargeModeLabels[effectiveSubscription.modalidad_cobro]}</p>
               <p className="mt-2 text-sm leading-7 text-slate-600">Cobro dirigido a {chargeTargetLabels[effectiveSubscription.destino_cobro].toLowerCase()}.</p>
             </div>
+          </div>
+        </article>
+      </div>
+
+      <div className="mt-6 grid gap-6 lg:grid-cols-[0.85fr_1.15fr]">
+        <form className="role-card grid gap-4" onSubmit={handleReportTransfer}>
+          <p className="text-sm uppercase tracking-[0.2em] text-slate-500">Reportar transferencia a plataforma</p>
+          <label><span className="field-label">Monto transferido</span><input className="field mt-2" min="0" onChange={(event) => setTransferAmount(event.target.value)} required step="0.01" type="number" value={transferAmount || String(subscription?.monto_mensual ?? 0)} /></label>
+          <label><span className="field-label">Fecha de transferencia</span><input className="field mt-2" onChange={(event) => setTransferDate(event.target.value)} type="date" value={transferDate} /></label>
+          <label><span className="field-label">Referencia</span><input className="field mt-2" onChange={(event) => setTransferReference(event.target.value)} placeholder="Alias, CBU o numero de operacion" value={transferReference} /></label>
+          <label><span className="field-label">Detalle</span><textarea className="field-textarea mt-2" onChange={(event) => setTransferNote(event.target.value)} rows={4} value={transferNote} /></label>
+          <button className="button-primary" disabled={reportingTransfer || !subscription} type="submit">{reportingTransfer ? "Reportando..." : "Reportar transferencia"}</button>
+        </form>
+
+        <article className="role-card">
+          <p className="text-sm uppercase tracking-[0.2em] text-slate-500">Transferencias enviadas</p>
+          <div className="mt-4 grid gap-3">
+            {transferEvents.length === 0 ? <p className="text-sm leading-7 text-slate-600">Todavia no reportaste transferencias.</p> : transferEvents.map((item) => <div className="rounded-2xl border border-slate-200 bg-white/80 p-4" key={item.id}><div className="flex flex-wrap items-start justify-between gap-3"><div><h4 className="text-lg font-semibold text-slate-950">$ {Number(item.importe).toLocaleString("es-AR")}</h4><p className="mt-1 text-sm leading-7 text-slate-600">{item.fecha_pago ? new Date(item.fecha_pago).toLocaleDateString("es-AR") : new Date(item.created_at).toLocaleDateString("es-AR")}</p></div><span className={item.estado === "pagado" ? "status-badge status-badge--success" : item.estado === "fallido" ? "rounded-full bg-rose-100 px-3 py-2 text-xs font-extrabold uppercase tracking-[0.18em] text-rose-700" : "status-badge status-badge--warning"}>{item.estado}</span></div>{item.referencia ? <p className="mt-2 text-xs uppercase tracking-[0.18em] text-slate-400">{item.referencia}</p> : null}{item.nota ? <p className="mt-2 text-sm leading-7 text-slate-600">{item.nota}</p> : null}</div>)}
           </div>
         </article>
       </div>
