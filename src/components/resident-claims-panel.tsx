@@ -10,7 +10,9 @@ type ClaimRow = {
   titulo: string;
   categoria: string | null;
   estado: string;
+  descripcion: string;
   foto_url: string | null;
+  visible_para_todo_consorcio: boolean;
   created_at: string;
 };
 
@@ -23,28 +25,43 @@ export function ResidentClaimsPanel() {
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
   const [claims, setClaims] = useState<ClaimRow[]>([]);
+  const [sharedClaims, setSharedClaims] = useState<ClaimRow[]>([]);
   const [title, setTitle] = useState("");
   const [category, setCategory] = useState("");
   const [description, setDescription] = useState("");
   const [photoFile, setPhotoFile] = useState<File | null>(null);
+  const [visibleToCommunity, setVisibleToCommunity] = useState(true);
 
   const loadClaims = useCallback(async (userId: string) => {
     if (!supabase) {
       return;
     }
     setLoading(true);
-    const { data, error: loadError } = await supabase
-      .from("reclamos")
-      .select("id, titulo, categoria, estado, foto_url, created_at")
-      .eq("creador_id", userId)
-      .order("created_at", { ascending: false })
-      .limit(6);
+    const [ownClaimsResult, sharedClaimsResult] = await Promise.all([
+      supabase
+        .from("reclamos")
+        .select("id, titulo, categoria, estado, descripcion, foto_url, visible_para_todo_consorcio, created_at")
+        .eq("creador_id", userId)
+        .order("created_at", { ascending: false })
+        .limit(6),
+      supabase
+        .from("reclamos")
+        .select("id, titulo, categoria, estado, descripcion, foto_url, visible_para_todo_consorcio, created_at")
+        .eq("visible_para_todo_consorcio", true)
+        .neq("creador_id", userId)
+        .order("created_at", { ascending: false })
+        .limit(6),
+    ]);
+
+    const loadError = ownClaimsResult.error ?? sharedClaimsResult.error;
     if (loadError) {
       setError(loadError.message);
       setLoading(false);
       return;
     }
-    setClaims((data as ClaimRow[] | null) ?? []);
+
+    setClaims((ownClaimsResult.data as ClaimRow[] | null) ?? []);
+    setSharedClaims((sharedClaimsResult.data as ClaimRow[] | null) ?? []);
     setLoading(false);
   }, [supabase]);
 
@@ -103,6 +120,7 @@ export function ResidentClaimsPanel() {
       p_categoria: category,
       p_descripcion: description,
       p_foto_url: photoUrl,
+      p_visible_para_todo_consorcio: visibleToCommunity,
     });
 
     if (createError) {
@@ -115,6 +133,7 @@ export function ResidentClaimsPanel() {
     setCategory("");
     setDescription("");
     setPhotoFile(null);
+    setVisibleToCommunity(true);
     setMessage("Reclamo creado correctamente.");
     await loadClaims(session.user.id);
     setSaving(false);
@@ -143,14 +162,32 @@ export function ResidentClaimsPanel() {
           <label><span className="field-label">Categoria</span><input className="field mt-2" onChange={(event) => setCategory(event.target.value)} placeholder="Ej: Iluminacion" value={category} /></label>
           <label><span className="field-label">Descripcion</span><textarea className="field-textarea mt-2" onChange={(event) => setDescription(event.target.value)} required value={description} /></label>
           <label><span className="field-label">Foto opcional</span><input className="field mt-2" accept="image/*,.pdf" onChange={(event) => setPhotoFile(event.target.files?.[0] ?? null)} type="file" /></label>
+          <label className="rounded-2xl border border-slate-200 bg-white/80 p-4 text-sm leading-7 text-slate-600">
+            <span className="flex items-center gap-3">
+              <input checked={visibleToCommunity} className="h-4 w-4" onChange={(event) => setVisibleToCommunity(event.target.checked)} type="checkbox" />
+              <span>
+                Mostrar este reclamo al resto del consorcio para evitar duplicados en areas comunes.
+              </span>
+            </span>
+          </label>
           <button className="button-primary" disabled={saving || loading} type="submit">{saving ? "Creando..." : "Crear reclamo"}</button>
         </form>
-        <article className="role-card">
-          <p className="text-sm uppercase tracking-[0.2em] text-slate-500">Mis reclamos</p>
-          <div className="mt-4 grid gap-3">
-            {loading ? <p className="text-sm leading-7 text-slate-600">Cargando reclamos.</p> : claims.length === 0 ? <p className="text-sm leading-7 text-slate-600">Todavia no cargaste reclamos.</p> : claims.map((item) => <div className="rounded-2xl border border-slate-200 bg-white/80 p-4" key={item.id}><div className="flex items-start justify-between gap-3"><h4 className="text-lg font-semibold text-slate-950">{item.titulo}</h4><span className="status-badge status-badge--neutral">{item.estado}</span></div><p className="mt-2 text-sm leading-7 text-slate-600">{item.categoria ?? "Sin categoria"}</p><div className="mt-2 flex items-center justify-between gap-3 text-xs uppercase tracking-[0.18em] text-slate-400"><span>{new Date(item.created_at).toLocaleDateString("es-AR")}</span>{item.foto_url ? <a href={item.foto_url} rel="noreferrer" target="_blank">Ver adjunto</a> : <span>Sin adjunto</span>}</div></div>)}
-          </div>
-        </article>
+        <div className="grid gap-6">
+          <article className="role-card">
+            <p className="text-sm uppercase tracking-[0.2em] text-slate-500">Mis reclamos</p>
+            <div className="mt-4 grid gap-3">
+              {loading ? <p className="text-sm leading-7 text-slate-600">Cargando reclamos.</p> : claims.length === 0 ? <p className="text-sm leading-7 text-slate-600">Todavia no cargaste reclamos.</p> : claims.map((item) => <div className="rounded-2xl border border-slate-200 bg-white/80 p-4" key={item.id}><div className="flex items-start justify-between gap-3"><h4 className="text-lg font-semibold text-slate-950">{item.titulo}</h4><span className="status-badge status-badge--neutral">{item.estado}</span></div><p className="mt-2 text-sm leading-7 text-slate-600">{item.categoria ?? "Sin categoria"}</p><p className="mt-2 text-sm leading-7 text-slate-600">{item.descripcion}</p><div className="mt-3 flex flex-wrap items-center gap-3 text-xs uppercase tracking-[0.18em] text-slate-400"><span>{new Date(item.created_at).toLocaleDateString("es-AR")}</span><span>{item.visible_para_todo_consorcio ? "Visible al consorcio" : "Solo administracion"}</span>{item.foto_url ? <a href={item.foto_url} rel="noreferrer" target="_blank">Ver adjunto</a> : <span>Sin adjunto</span>}</div></div>)}
+            </div>
+          </article>
+
+          <article className="role-card">
+            <p className="text-sm uppercase tracking-[0.2em] text-slate-500">Reclamos compartidos</p>
+            <p className="mt-2 text-sm leading-7 text-slate-600">Incidencias visibles del consorcio para evitar duplicar reportes sobre areas comunes.</p>
+            <div className="mt-4 grid gap-3">
+              {loading ? <p className="text-sm leading-7 text-slate-600">Cargando reclamos compartidos.</p> : sharedClaims.length === 0 ? <p className="text-sm leading-7 text-slate-600">Todavia no hay reclamos compartidos visibles.</p> : sharedClaims.map((item) => <div className="rounded-2xl border border-slate-200 bg-white/80 p-4" key={item.id}><div className="flex items-start justify-between gap-3"><h4 className="text-lg font-semibold text-slate-950">{item.titulo}</h4><span className="status-badge status-badge--neutral">{item.estado}</span></div><p className="mt-2 text-sm leading-7 text-slate-600">{item.categoria ?? "Sin categoria"}</p><p className="mt-2 text-sm leading-7 text-slate-600">{item.descripcion}</p><div className="mt-3 flex flex-wrap items-center gap-3 text-xs uppercase tracking-[0.18em] text-slate-400"><span>{new Date(item.created_at).toLocaleDateString("es-AR")}</span>{item.foto_url ? <a href={item.foto_url} rel="noreferrer" target="_blank">Ver adjunto</a> : <span>Sin adjunto</span>}</div></div>)}
+            </div>
+          </article>
+        </div>
       </div>
     </section>
   );

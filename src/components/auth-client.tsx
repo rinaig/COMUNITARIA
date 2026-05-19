@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useMemo, useState, type ChangeEventHandler, type FormEvent } from "react";
 import type { Session, User } from "@supabase/supabase-js";
 import type { AppRole } from "@/lib/domain";
 import type { ProfileRecord, TenantRecord } from "@/lib/auth-types";
@@ -46,6 +46,33 @@ function resolveRoute(profile: ProfileRecord | null) {
   return portalRouteByRole[profile.rol];
 }
 
+type PasswordFieldProps = {
+  label: string;
+  required?: boolean;
+  value: string;
+  visible: boolean;
+  onChange: ChangeEventHandler<HTMLInputElement>;
+  onToggle: () => void;
+};
+
+function PasswordField({ label, required = false, value, visible, onChange, onToggle }: PasswordFieldProps) {
+  return (
+    <label>
+      <span className="field-label">{label}</span>
+      <div className="password-field mt-2">
+        <input className="field password-field__input" onChange={onChange} required={required} type={visible ? "text" : "password"} value={value} />
+        <button aria-label={visible ? "Ocultar contrasena" : "Mostrar contrasena"} className="password-field__toggle" onClick={onToggle} type="button">
+          <svg aria-hidden="true" fill="none" height="18" viewBox="0 0 24 24" width="18">
+            <path d="M2 12C4.7 7.8 8 5.7 12 5.7C16 5.7 19.3 7.8 22 12C19.3 16.2 16 18.3 12 18.3C8 18.3 4.7 16.2 2 12Z" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.8" />
+            <circle cx="12" cy="12" r="3.2" stroke="currentColor" strokeWidth="1.8" />
+            {visible ? null : <path d="M4 4L20 20" stroke="currentColor" strokeLinecap="round" strokeWidth="1.8" />}
+          </svg>
+        </button>
+      </div>
+    </label>
+  );
+}
+
 export function AuthClient() {
   const supabase = useMemo(() => getSupabaseBrowserClient(), []);
   const configured = isSupabaseConfigured();
@@ -53,7 +80,6 @@ export function AuthClient() {
   const searchParams = useSearchParams();
   const prefillCode = searchParams.get("codigo")?.trim() ?? "";
   const prefillEmail = searchParams.get("email")?.trim().toLowerCase() ?? "";
-  const prefillUnit = searchParams.get("unidad")?.trim().toUpperCase() ?? "";
   const typeParam = searchParams.get("tipo")?.trim();
   const prefillRole: AccessRole = typeParam === "admin" ? "admin" : typeParam === "seguridad" ? "seguridad" : "residente";
 
@@ -69,12 +95,12 @@ export function AuthClient() {
   const [apellido, setApellido] = useState("");
   const [telefono, setTelefono] = useState("");
   const [dni, setDni] = useState("");
-  const [unidad, setUnidad] = useState(prefillUnit);
   const [codigoAcceso, setCodigoAcceso] = useState(prefillCode);
   const [consorcioNombre, setConsorcioNombre] = useState("");
   const [consorcioDireccion, setConsorcioDireccion] = useState("");
   const [consorcioCuit, setConsorcioCuit] = useState("");
   const [tipoOtro, setTipoOtro] = useState("");
+  const [passwordVisible, setPasswordVisible] = useState(false);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -356,12 +382,6 @@ export function AuthClient() {
       return;
     }
 
-    if (accessRole === "residente" && !unidad.trim()) {
-      setError("La unidad funcional es obligatoria para residentes.");
-      setBusy(false);
-      return;
-    }
-
     const user = await ensureAuthenticatedUser();
 
     if (!user) {
@@ -376,7 +396,7 @@ export function AuthClient() {
       p_apellido: apellido.trim(),
       p_telefono: telefono.trim() || null,
       p_dni: normalizeDni(dni),
-      p_unidad_funcional: accessRole === "residente" ? unidad.trim().toUpperCase() : null,
+      p_unidad_funcional: null,
     });
 
     if (rpcError) {
@@ -431,23 +451,6 @@ export function AuthClient() {
                 <li>Usuario o seguridad: activacion con mail y codigo valido por 48 horas.</li>
                 <li>Los errores de rol se informan en el alta para evitar accesos al flujo equivocado.</li>
               </ul>
-            </article>
-
-            <article className="role-card">
-              <p className="text-sm font-semibold text-slate-500">Estado de configuracion</p>
-              <div className="mt-3 flex items-center gap-3">
-                <span className={`status-badge ${configured ? "status-badge--success" : "status-badge--warning"}`}>
-                  {configured ? "Supabase listo" : "Faltan variables"}
-                </span>
-              </div>
-              <p className="mt-3 text-sm leading-7 text-slate-600">
-                Cargar NEXT_PUBLIC_SUPABASE_URL y NEXT_PUBLIC_SUPABASE_ANON_KEY en .env.local para usar el acceso real.
-              </p>
-              {codigoAcceso ? (
-                <p className="mt-3 text-sm leading-7 text-slate-700">
-                  Codigo detectado: {codigoAcceso}. El formulario de activacion ya quedo preparado.
-                </p>
-              ) : null}
             </article>
 
             <div className="flex flex-wrap gap-3 pt-2">
@@ -573,10 +576,6 @@ export function AuthClient() {
                           <span className="field-label">Codigo de acceso</span>
                           <input className="field mt-2 uppercase" onChange={(event) => setCodigoAcceso(event.target.value.toUpperCase())} required value={codigoAcceso} />
                         </label>
-                        <label>
-                          <span className="field-label">Unidad funcional</span>
-                          <input className="field mt-2 uppercase" disabled={accessRole !== "residente"} onChange={(event) => setUnidad(event.target.value.toUpperCase())} required={accessRole === "residente"} value={unidad} />
-                        </label>
                       </div>
 
                       <button className="button-primary" disabled={busy} type="submit">
@@ -644,11 +643,11 @@ export function AuthClient() {
           ) : (
             <div className="grid gap-5">
               <div className="flex flex-wrap gap-3">
-                <button className={view === "login" ? "button-primary" : "button-secondary"} onClick={() => setView("login")} type="button">
-                  Ingresar
-                </button>
                 <button className={view === "admin" ? "button-primary" : "button-secondary"} onClick={() => setView("admin")} type="button">
                   Alta administrador
+                </button>
+                <button className={view === "login" ? "button-primary" : "button-secondary"} onClick={() => setView("login")} type="button">
+                  Acceso a plataforma
                 </button>
                 <button className={view === "access" ? "button-primary" : "button-secondary"} onClick={() => setView("access")} type="button">
                   Activar acceso
@@ -661,10 +660,7 @@ export function AuthClient() {
                     <span className="field-label">Email</span>
                     <input className="field mt-2" onChange={(event) => setEmail(event.target.value)} required type="email" value={email} />
                   </label>
-                  <label>
-                    <span className="field-label">Contrasena</span>
-                    <input className="field mt-2" onChange={(event) => setPassword(event.target.value)} required type="password" value={password} />
-                  </label>
+                  <PasswordField label="Contrasena" onChange={(event) => setPassword(event.target.value)} onToggle={() => setPasswordVisible((current) => !current)} required value={password} visible={passwordVisible} />
 
                   <button className="button-primary" disabled={busy} type="submit">
                     {busy ? "Ingresando..." : "Ingresar"}
@@ -693,10 +689,7 @@ export function AuthClient() {
                       <span className="field-label">Email</span>
                       <input className="field mt-2" onChange={(event) => setEmail(event.target.value)} required type="email" value={email} />
                     </label>
-                    <label>
-                      <span className="field-label">Contrasena</span>
-                      <input className="field mt-2" onChange={(event) => setPassword(event.target.value)} required type="password" value={password} />
-                    </label>
+                    <PasswordField label="Contrasena" onChange={(event) => setPassword(event.target.value)} onToggle={() => setPasswordVisible((current) => !current)} required value={password} visible={passwordVisible} />
                     <label>
                       <span className="field-label">Nombre del consorcio</span>
                       <input className="field mt-2" onChange={(event) => setConsorcioNombre(event.target.value)} required value={consorcioNombre} />
@@ -761,17 +754,10 @@ export function AuthClient() {
                       <span className="field-label">Email</span>
                       <input className="field mt-2" onChange={(event) => setEmail(event.target.value)} required type="email" value={email} />
                     </label>
-                    <label>
-                      <span className="field-label">Contrasena</span>
-                      <input className="field mt-2" onChange={(event) => setPassword(event.target.value)} required type="password" value={password} />
-                    </label>
+                    <PasswordField label="Contrasena" onChange={(event) => setPassword(event.target.value)} onToggle={() => setPasswordVisible((current) => !current)} required value={password} visible={passwordVisible} />
                     <label>
                       <span className="field-label">Codigo de acceso</span>
                       <input className="field mt-2 uppercase" onChange={(event) => setCodigoAcceso(event.target.value.toUpperCase())} required value={codigoAcceso} />
-                    </label>
-                    <label>
-                      <span className="field-label">Unidad funcional</span>
-                      <input className="field mt-2 uppercase" disabled={accessRole !== "residente"} onChange={(event) => setUnidad(event.target.value.toUpperCase())} required={accessRole === "residente"} value={unidad} />
                     </label>
                   </div>
 

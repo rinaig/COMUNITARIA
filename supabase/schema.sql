@@ -2432,7 +2432,8 @@ create or replace function public.create_claim_ticket(
   p_titulo text,
   p_categoria text,
   p_descripcion text,
-  p_foto_url text default null
+  p_foto_url text default null,
+  p_visible_para_todo_consorcio boolean default true
 )
 returns table(claim_id uuid)
 language plpgsql
@@ -2492,7 +2493,7 @@ begin
     trim(p_descripcion),
     nullif(trim(coalesce(p_foto_url, '')), ''),
     'pendiente',
-    true
+    coalesce(p_visible_para_todo_consorcio, true)
   )
   returning id into created_claim_id;
 
@@ -3785,7 +3786,7 @@ grant execute on function public.list_pending_dependent_reservations() to authen
 grant execute on function public.review_dependent_reservation_request(uuid, text) to authenticated;
 grant execute on function public.cancel_reservation_request(uuid, text) to authenticated;
 grant execute on function public.reschedule_reservation_request(uuid, date, time, time) to authenticated;
-grant execute on function public.create_claim_ticket(text, text, text, text) to authenticated;
+grant execute on function public.create_claim_ticket(text, text, text, text, boolean) to authenticated;
 grant execute on function public.update_claim_ticket(uuid, public.ticket_status, text) to authenticated;
 grant execute on function public.create_visit_authorization(text, text, date, time, time, uuid, text, text, integer, text, boolean) to authenticated;
 grant execute on function public.list_pending_dependent_visits() to authenticated;
@@ -4169,6 +4170,7 @@ for select
 using (
   public.is_superadmin()
   or (consorcio_id = public.current_consorcio_id() and public.current_role() = 'admin')
+  or (consorcio_id = public.current_consorcio_id() and visible_para_todo_consorcio = true)
   or creador_id = auth.uid()
 );
 
@@ -4190,6 +4192,13 @@ for select
 using (
   public.is_superadmin()
   or (consorcio_id = public.current_consorcio_id() and public.current_role() = 'admin')
+  or exists (
+    select 1
+    from public.reclamos r
+    where r.id = reclamo_id
+      and r.consorcio_id = public.current_consorcio_id()
+      and r.visible_para_todo_consorcio = true
+  )
   or exists (
     select 1
     from public.reclamos r

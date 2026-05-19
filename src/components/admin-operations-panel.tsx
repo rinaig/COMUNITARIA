@@ -14,6 +14,7 @@ type ClaimItem = {
   estado: ClaimStatus;
   descripcion: string;
   foto_url: string | null;
+  visible_para_todo_consorcio: boolean;
   created_at: string;
 };
 
@@ -64,7 +65,7 @@ export function AdminOperationsPanel() {
 
     const [announcementsResult, claimsResult, eventsResult] = await Promise.all([
       supabase.from("anuncios").select("id, titulo, contenido, prioridad, publicado_at").order("publicado_at", { ascending: false }).limit(5),
-      supabase.from("reclamos").select("id, titulo, categoria, estado, descripcion, foto_url, created_at").order("created_at", { ascending: false }).limit(8),
+      supabase.from("reclamos").select("id, titulo, categoria, estado, descripcion, foto_url, visible_para_todo_consorcio, created_at").order("created_at", { ascending: false }).limit(8),
       supabase.from("reclamo_eventos").select("id, reclamo_id, estado, comentario, created_at").order("created_at", { ascending: false }).limit(20),
     ]);
 
@@ -241,13 +242,13 @@ export function AdminOperationsPanel() {
             <article className="role-card">
               <p className="text-sm uppercase tracking-[0.2em] text-slate-500">Tickets recientes</p>
               <div className="mt-4 grid gap-3">
-                {loading ? <p className="text-sm leading-7 text-slate-600">Cargando reclamos.</p> : claims.length === 0 ? <p className="text-sm leading-7 text-slate-600">Todavia no hay reclamos cargados.</p> : claims.map((item) => <button className="rounded-2xl border border-slate-200 bg-white/80 p-4 text-left transition-colors hover:border-slate-300" key={item.id} onClick={() => { setSelectedClaimId(item.id); setClaimStatus(item.estado); }} type="button"><div className="flex items-start justify-between gap-3"><h4 className="text-lg font-semibold text-slate-950">{item.titulo}</h4><span className="status-badge status-badge--neutral">{item.estado}</span></div><p className="mt-2 text-sm leading-7 text-slate-600">{item.categoria ?? "Sin categoria"}</p><p className="mt-1 text-xs uppercase tracking-[0.18em] text-slate-400">{new Date(item.created_at).toLocaleDateString("es-AR")}</p></button>)}
+                {loading ? <p className="text-sm leading-7 text-slate-600">Cargando reclamos.</p> : claims.length === 0 ? <p className="text-sm leading-7 text-slate-600">Todavia no hay reclamos cargados.</p> : claims.map((item) => <button className="rounded-2xl border border-slate-200 bg-white/80 p-4 text-left transition-colors hover:border-slate-300" key={item.id} onClick={() => { setSelectedClaimId(item.id); setClaimStatus(item.estado); }} type="button"><div className="flex items-start justify-between gap-3"><h4 className="text-lg font-semibold text-slate-950">{item.titulo}</h4><span className="status-badge status-badge--neutral">{item.estado}</span></div><p className="mt-2 text-sm leading-7 text-slate-600">{item.categoria ?? "Sin categoria"}</p><div className="mt-2 flex flex-wrap items-center gap-3 text-xs uppercase tracking-[0.18em] text-slate-400"><span>{new Date(item.created_at).toLocaleDateString("es-AR")}</span><span>{item.visible_para_todo_consorcio ? "Visible al consorcio" : "Solo administracion"}</span></div></button>)}
               </div>
             </article>
 
             <article className="role-card">
               <p className="text-sm uppercase tracking-[0.2em] text-slate-500">Historial del ticket</p>
-              {selectedClaim ? <div className="mt-4 rounded-2xl border border-slate-200 bg-white/80 p-4"><h4 className="text-lg font-semibold text-slate-950">{selectedClaim.titulo}</h4><p className="mt-2 text-sm leading-7 text-slate-600">{selectedClaim.descripcion}</p><div className="mt-3 flex items-center gap-3 text-xs uppercase tracking-[0.18em] text-slate-400"><span>{selectedClaim.categoria ?? "Sin categoria"}</span><span>{new Date(selectedClaim.created_at).toLocaleDateString("es-AR")}</span>{selectedClaim.foto_url ? <a href={selectedClaim.foto_url} rel="noreferrer" target="_blank">Ver adjunto</a> : null}</div></div> : <p className="mt-4 text-sm leading-7 text-slate-600">Selecciona un reclamo para ver su detalle.</p>}
+              {selectedClaim ? <div className="mt-4 rounded-2xl border border-slate-200 bg-white/80 p-4"><h4 className="text-lg font-semibold text-slate-950">{selectedClaim.titulo}</h4><p className="mt-2 text-sm leading-7 text-slate-600">{selectedClaim.descripcion}</p><div className="mt-3 flex flex-wrap items-center gap-3 text-xs uppercase tracking-[0.18em] text-slate-400"><span>{selectedClaim.categoria ?? "Sin categoria"}</span><span>{new Date(selectedClaim.created_at).toLocaleDateString("es-AR")}</span><span>{selectedClaim.visible_para_todo_consorcio ? "Visible al consorcio" : "Solo administracion"}</span>{selectedClaim.foto_url ? <a href={selectedClaim.foto_url} rel="noreferrer" target="_blank">Ver adjunto</a> : null}</div></div> : <p className="mt-4 text-sm leading-7 text-slate-600">Selecciona un reclamo para ver su detalle.</p>}
               <div className="mt-4 grid gap-3">
                 {selectedClaimHistory.length === 0 ? <p className="text-sm leading-7 text-slate-600">Aun no hay historial adicional para este reclamo.</p> : selectedClaimHistory.map((item) => <div className="rounded-2xl border border-slate-200 bg-white/80 p-4" key={item.id}><div className="flex items-start justify-between gap-3"><span className="status-badge status-badge--neutral">{item.estado ?? "sin estado"}</span><span className="text-xs uppercase tracking-[0.18em] text-slate-400">{new Date(item.created_at).toLocaleDateString("es-AR")}</span></div><p className="mt-2 text-sm leading-7 text-slate-600">{item.comentario ?? "Sin comentario adicional."}</p></div>)}
               </div>

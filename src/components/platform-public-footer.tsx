@@ -53,7 +53,7 @@ export function PlatformPublicFooter() {
 
   return (
     <footer className="border-t border-slate-200/80 bg-white/70 backdrop-blur">
-      <div className="mx-auto flex w-full max-w-7xl flex-col gap-4 px-6 py-6 lg:flex-row lg:items-center lg:justify-between lg:px-10">
+      <div className="flex w-full flex-col gap-4 px-4 py-6 sm:px-6 lg:flex-row lg:items-center lg:justify-between lg:px-10">
         <div className="flex flex-wrap gap-3">
           {socialLinks.map((item) =>
             item.href ? (
