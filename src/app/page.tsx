@@ -81,7 +81,7 @@ export default function Home() {
         <header className="glass-panel flex items-center justify-between rounded-full px-5 py-3">
           <div className="flex items-center gap-4">
             <div className="overflow-hidden rounded-2xl border border-white/80 bg-white/90 p-2 shadow-sm">
-              <Image alt="Logo Comunitaria" className="h-auto w-[132px]" height={72} priority src="/brand/comunitaria-logo.png" width={132} />
+              <Image alt="Logo Comunitaria" className="w-[132px]" height={72} priority src="/brand/comunitaria-logo.png" style={{ height: "auto" }} width={132} />
             </div>
             <p className="text-xs uppercase tracking-[0.3em] text-slate-500">
               SaaS multi-tenant
@@ -91,8 +91,8 @@ export default function Home() {
               <p className="text-sm text-slate-500">Gestion transparente para consorcios y barrios privados</p>
             </div>
           </div>
-          <Link className="button-primary" href="/portal/admin">
-            Ver demo del portal
+          <Link className="button-primary" href="/auth">
+            Ingresar
           </Link>
         </header>
 
@@ -104,7 +104,7 @@ export default function Home() {
 
             <div className="space-y-5">
               <div className="flex items-center gap-4 rounded-[2rem] border border-white/80 bg-white/75 p-4 shadow-sm backdrop-blur md:max-w-xl">
-                <Image alt="Marca Comunitaria" className="h-auto w-[172px]" height={92} priority src="/brand/comunitaria-logo.png" width={172} />
+                <Image alt="Marca Comunitaria" className="w-[172px]" height={92} priority src="/brand/comunitaria-logo.png" style={{ height: "auto" }} width={172} />
                 <div>
                   <p className="text-xs uppercase tracking-[0.24em] text-slate-500">Identidad de marca</p>
                   <p className="mt-2 text-sm leading-6 text-slate-600">La portada ahora usa la identidad visual y los recursos que dejaste en el proyecto.</p>
@@ -120,7 +120,7 @@ export default function Home() {
 
             <div className="flex flex-col gap-4 sm:flex-row sm:flex-wrap">
               <Link className="button-primary" href="/portal/admin">
-                Entrar como administrador
+                Abrir portal administrador
               </Link>
               <Link className="button-primary" href="/auth?tipo=admin&modo=demo">
                 Probar gratis hasta 3 unidades
@@ -160,7 +160,7 @@ export default function Home() {
                         Panel operativo del dia
                       </p>
                     </div>
-                    <Image alt="Isotipo Comunitaria" className="h-auto w-16" height={64} src="/brand/comunitaria-isotipo.png" width={64} />
+                    <Image alt="Isotipo Comunitaria" className="w-16" height={64} src="/brand/comunitaria-isotipo.png" style={{ height: "auto" }} width={64} />
                   </div>
 
                   <div className="mt-5 grid gap-4 sm:grid-cols-2">

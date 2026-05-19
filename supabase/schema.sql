@@ -525,6 +525,7 @@ $$;
 create or replace function public.touch_updated_at()
 returns trigger
 language plpgsql
+set search_path = public
 as $$
 begin
   new.updated_at = timezone('utc', now());
@@ -805,6 +806,7 @@ where not exists (
 create or replace function public.generate_invitation_code(seed text)
 returns text
 language plpgsql
+set search_path = public
 as $$
 declare
   normalized text;
@@ -3258,6 +3260,27 @@ begin
   return delivery_count;
 end;
 $$;
+
+do $$
+declare
+  routine_signature text;
+begin
+  for routine_signature in
+    select p.oid::regprocedure::text
+    from pg_proc p
+    join pg_namespace n on n.oid = p.pronamespace
+    where n.nspname = 'public'
+      and p.prosecdef = true
+  loop
+    execute format('revoke all on function public.%s from public, anon', routine_signature);
+  end loop;
+end;
+$$;
+
+grant execute on function public.current_consorcio_id() to authenticated;
+grant execute on function public.current_role() to authenticated;
+grant execute on function public.is_superadmin() to authenticated;
+grant execute on function public.current_profile_is_active() to authenticated;
 
 grant execute on function public.complete_admin_onboarding(text, text, text, text, text, text, text) to authenticated;
 grant execute on function public.complete_demo_onboarding(text, text, text, text, text, text, text) to authenticated;
