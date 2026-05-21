@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
 import type { Session } from "@supabase/supabase-js";
-import { getCurrentConsorcioId, OPERATIONS_BUCKET, uploadTenantFile } from "@/lib/storage";
+import { getCurrentConsorcioId, OPERATIONS_BUCKET, removeTenantFile, removeTenantFileByPublicUrl, uploadTenantFile } from "@/lib/storage";
 import { getSupabaseBrowserClient, isSupabaseConfigured } from "@/lib/supabase";
 
 type Provider = {
@@ -187,11 +187,18 @@ export function AdminProvidersPanel() {
     setError("");
     setMessage("");
 
+    let uploadedPath = "";
+
     try {
       const consorcioId = await getCurrentConsorcioId(supabase, session.user.id);
       const selectedRequirement = requirements.find((item) => item.id === selectedRequirementId) ?? null;
+      const existingDocument = documents.find((item) =>
+        item.proveedor_id === selectedProviderId
+        && ((selectedRequirementId && item.requisito_id === selectedRequirementId) || (!selectedRequirementId && !item.requisito_id && item.tipo === documentKind)),
+      ) ?? null;
       const upload = await uploadTenantFile(supabase, OPERATIONS_BUCKET, consorcioId, documentFile, "provider-docs");
-      const { error: insertError } = await supabase.from("proveedor_documentos").insert({
+      uploadedPath = upload.path;
+      const documentPayload = {
         consorcio_id: consorcioId,
         proveedor_id: selectedProviderId,
         tipo: documentKind,
@@ -199,18 +206,42 @@ export function AdminProvidersPanel() {
         nombre_documento: selectedRequirement?.nombre ?? null,
         vence_el: documentExpiresAt,
         archivo_url: upload.publicUrl,
-      });
+      };
 
-      if (insertError) {
-        throw insertError;
+      if (existingDocument) {
+        const { error: updateError } = await supabase
+          .from("proveedor_documentos")
+          .update(documentPayload)
+          .eq("id", existingDocument.id);
+
+        if (updateError) {
+          throw updateError;
+        }
+
+        if (existingDocument.archivo_url !== upload.publicUrl) {
+          await removeTenantFileByPublicUrl(supabase, OPERATIONS_BUCKET, existingDocument.archivo_url);
+        }
+      } else {
+        const { error: insertError } = await supabase.from("proveedor_documentos").insert(documentPayload);
+
+        if (insertError) {
+          throw insertError;
+        }
       }
 
       setDocumentKind("art");
       setDocumentExpiresAt(new Date().toISOString().slice(0, 10));
       setDocumentFile(null);
-      setMessage("Documento del proveedor cargado correctamente.");
+      setMessage(existingDocument ? "Documento del proveedor reemplazado correctamente." : "Documento del proveedor cargado correctamente.");
       await loadData();
     } catch (submitError) {
+      if (uploadedPath) {
+        try {
+          await removeTenantFile(supabase, OPERATIONS_BUCKET, uploadedPath);
+        } catch {
+          // ignore cleanup failures after an upload that could not be linked in DB
+        }
+      }
       setError(submitError instanceof Error ? submitError.message : "No se pudo cargar el documento.");
     }
 
@@ -311,7 +342,7 @@ export function AdminProvidersPanel() {
             <label><span className="field-label">Tipo base</span><select className="field-select mt-2" onChange={(event) => setDocumentKind(event.target.value as ProviderDocument["tipo"])} value={documentKind}>{documentKinds.map((item) => <option key={item} value={item}>{item}</option>)}</select></label>
             <label><span className="field-label">Vence el</span><input className="field mt-2" onChange={(event) => setDocumentExpiresAt(event.target.value)} required type="date" value={documentExpiresAt} /></label>
             <label><span className="field-label">Archivo</span><input className="field mt-2" accept=".pdf,image/*" onChange={(event) => setDocumentFile(event.target.files?.[0] ?? null)} required type="file" /></label>
-            <p className="text-sm leading-7 text-slate-600">Las imagenes se optimizan a WebP con ancho maximo de 1200 px y tope final de 3 MB. Los PDF se suben sin conversion.</p>
+            <p className="text-sm leading-7 text-slate-600">Las imagenes se optimizan a WebP con ancho maximo de 1200 px y tope final de 3 MB. Los PDF se suben sin conversion. Si el proveedor ya tenia este documento, se reemplaza el archivo anterior.</p>
             {selectedRequirement ? <p className="text-sm leading-7 text-slate-600">Se cargara como {selectedRequirement.nombre} {selectedRequirement.requerido ? "obligatorio" : "opcional"} con alerta {selectedRequirement.dias_alerta} dias antes del vencimiento.</p> : null}
             <button className="button-primary" disabled={savingDocument || loading} type="submit">{savingDocument ? "Subiendo..." : "Subir documento"}</button>
           </form>

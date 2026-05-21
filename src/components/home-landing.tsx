@@ -137,7 +137,7 @@ export function HomeLanding() {
         <header className="sticky top-0 z-30 w-full border-b border-slate-200/80 bg-white/92 shadow-sm backdrop-blur">
           <div className="flex w-full items-center justify-between px-4 py-4 sm:px-6 lg:px-10 xl:px-14 2xl:px-20">
             <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white p-3 shadow-sm">
-              <Image alt="Logo Comunitaria" className="w-[156px]" height={84} priority src="/brand/comunitaria-logo.png" style={{ height: "auto" }} width={156} />
+              <Image alt="Logo Comunitaria" className="h-auto w-[156px]" height={84} priority src="/brand/comunitaria-logo.png" width={156} />
             </div>
             <div className="flex flex-wrap gap-3">
               <Link className="button-primary" href="/auth">

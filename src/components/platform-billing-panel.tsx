@@ -341,15 +341,18 @@ export function PlatformBillingPanel() {
     setError("");
     setMessage("");
 
-    const saveResult = await savePlatformSettingsCompat(supabase, buildSettingsPayload());
+    const settingsPayload = buildSettingsPayload();
+    const saveResult = await savePlatformSettingsCompat(supabase, settingsPayload);
 
     if (saveResult.error) {
-      setError(saveResult.error);
+      persistPublicSettingsPreview(settingsPayload);
+      setSchemaWarning(getCompatIssueMessage("Configuracion publica", saveResult.error));
+      setMessage("No se pudo guardar en la base ahora. La vista previa local sigue disponible en esta sesion.");
       setSavingGlobalPrice(false);
       return;
     }
 
-    persistPublicSettingsPreview(buildSettingsPayload());
+    persistPublicSettingsPreview(settingsPayload);
 
     setSchemaWarning(saveResult.warning ?? schemaWarning);
 
@@ -382,13 +385,18 @@ export function PlatformBillingPanel() {
     setMessage("");
 
     const normalizedHomeContent = normalizeHomeContent(homeContent);
-    const saveResult = await savePlatformSettingsCompat(supabase, {
+    const settingsPayload = {
       ...buildSettingsPayload(),
       home_content: normalizedHomeContent,
-    });
+    };
+    const saveResult = await savePlatformSettingsCompat(supabase, settingsPayload);
 
     if (saveResult.error) {
-      setError(saveResult.error);
+      setHomeContent(normalizedHomeContent);
+      persistHomeContentPreview(normalizedHomeContent);
+      persistPublicSettingsPreview(settingsPayload);
+      setSchemaWarning(getCompatIssueMessage("Home publico", saveResult.error));
+      setMessage("No se pudo persistir el home en la base ahora, pero esta sesion local ya muestra la portada actualizada.");
       setSavingHomeContent(false);
       return;
     }

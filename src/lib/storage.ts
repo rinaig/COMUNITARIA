@@ -146,3 +146,30 @@ export async function uploadTenantFile(
     publicUrl: data.publicUrl,
   };
 }
+
+export async function removeTenantFile(supabase: SupabaseClient, bucket: string, objectPath: string) {
+  const { error } = await supabase.storage.from(bucket).remove([objectPath]);
+
+  if (error) {
+    throw error;
+  }
+}
+
+export async function removeTenantFileByPublicUrl(supabase: SupabaseClient, bucket: string, publicUrl: string) {
+  const marker = `/storage/v1/object/public/${bucket}/`;
+  const url = new URL(publicUrl);
+  const markerIndex = url.pathname.indexOf(marker);
+
+  if (markerIndex === -1) {
+    return;
+  }
+
+  const encodedPath = url.pathname.slice(markerIndex + marker.length);
+  const objectPath = decodeURIComponent(encodedPath);
+
+  if (!objectPath) {
+    return;
+  }
+
+  await removeTenantFile(supabase, bucket, objectPath);
+}

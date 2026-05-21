@@ -21,7 +21,7 @@ function readPreviewSettings() {
 export function PlatformPublicFooter() {
   const supabase = useMemo(() => getSupabaseBrowserClient(), []);
   const configured = isSupabaseConfigured();
-  const [settings, setSettings] = useState<PlatformSettingsCompatRow | null>(() => typeof window === "undefined" ? null : readPreviewSettings());
+  const [settings, setSettings] = useState<PlatformSettingsCompatRow | null>(null);
 
   useEffect(() => {
     if (!configured || !supabase) {
@@ -39,7 +39,7 @@ export function PlatformPublicFooter() {
       const result = await loadPlatformSettingsCompat(supabase);
 
       if (!ignore) {
-        setSettings(result.error ? null : result.data);
+        setSettings((current) => result.error ? current : result.data);
       }
     };
 
