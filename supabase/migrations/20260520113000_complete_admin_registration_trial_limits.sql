@@ -1,4 +1,16 @@
-create or replace function public.complete_admin_registration(
+drop function if exists public.complete_admin_registration(
+  text,
+  text,
+  text,
+  text,
+  text,
+  text,
+  text,
+  text,
+  text
+);
+
+create function public.complete_admin_registration(
   p_nombre text,
   p_apellido text,
   p_telefono text,
@@ -146,3 +158,5 @@ begin
   select current_user_id, created_consorcio_id, generated_code, trial_deadline, 3, 1;
 end;
 $$;
+
+grant execute on function public.complete_admin_registration(text, text, text, text, text, text, text, text, text) to authenticated;
