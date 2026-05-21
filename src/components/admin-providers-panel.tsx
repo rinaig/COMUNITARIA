@@ -311,6 +311,7 @@ export function AdminProvidersPanel() {
             <label><span className="field-label">Tipo base</span><select className="field-select mt-2" onChange={(event) => setDocumentKind(event.target.value as ProviderDocument["tipo"])} value={documentKind}>{documentKinds.map((item) => <option key={item} value={item}>{item}</option>)}</select></label>
             <label><span className="field-label">Vence el</span><input className="field mt-2" onChange={(event) => setDocumentExpiresAt(event.target.value)} required type="date" value={documentExpiresAt} /></label>
             <label><span className="field-label">Archivo</span><input className="field mt-2" accept=".pdf,image/*" onChange={(event) => setDocumentFile(event.target.files?.[0] ?? null)} required type="file" /></label>
+            <p className="text-sm leading-7 text-slate-600">Las imagenes se optimizan a WebP con ancho maximo de 1200 px y tope final de 3 MB. Los PDF se suben sin conversion.</p>
             {selectedRequirement ? <p className="text-sm leading-7 text-slate-600">Se cargara como {selectedRequirement.nombre} {selectedRequirement.requerido ? "obligatorio" : "opcional"} con alerta {selectedRequirement.dias_alerta} dias antes del vencimiento.</p> : null}
             <button className="button-primary" disabled={savingDocument || loading} type="submit">{savingDocument ? "Subiendo..." : "Subir documento"}</button>
           </form>

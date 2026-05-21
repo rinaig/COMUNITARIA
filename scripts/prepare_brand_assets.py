@@ -7,9 +7,11 @@ ROOT = Path(r"c:\PROYECTOS_DE_DESARROLLOS\COMUNITARIA")
 PUBLIC = ROOT / "public"
 BRAND = PUBLIC / "brand"
 MEDIA = PUBLIC / "media"
+FLYERS = MEDIA / "flyers"
 
 BRAND.mkdir(parents=True, exist_ok=True)
 MEDIA.mkdir(parents=True, exist_ok=True)
+FLYERS.mkdir(parents=True, exist_ok=True)
 
 SOURCE_MAP = {
     ROOT / "Logo.png": (BRAND / "comunitaria-logo.png", "fill"),
@@ -21,6 +23,17 @@ SOURCE_MAP = {
     ROOT / "Módulo administración o expensas 1 imagen horizontal de 1600 x 1000.png": (MEDIA / "modulo-expensas.png", "crop"),
     ROOT / "Módulo reclamos o mantenimiento 1 imagen horizontal de 1600 x 1000.png": (MEDIA / "modulo-reclamos.png", "crop"),
     ROOT / "Splash o Portada Movil (1536 x v2048).png": (MEDIA / "splash-mobile.png", "crop"),
+    ROOT / "Presentacion FLyer.png": (FLYERS / "presentacion-1.png", "crop"),
+    ROOT / "Presentacion2 Flyer.png": (FLYERS / "presentacion-2.png", "crop"),
+    ROOT / "Presentacion3 Flyer.png": (FLYERS / "presentacion-3.png", "crop"),
+    ROOT / "Consorcio integrado Flyer.png": (FLYERS / "consorcio-integrado-1.png", "crop"),
+    ROOT / "Consorcio Integrado2 FLyer.png": (FLYERS / "consorcio-integrado-2.png", "crop"),
+    ROOT / "Ahorro Energia Flyer.png": (FLYERS / "ahorro-energia.png", "crop"),
+    ROOT / "Reservas Flyer.png": (FLYERS / "reservas.png", "crop"),
+    ROOT / "Reclamos Flyer.png": (FLYERS / "reclamos-1.png", "crop"),
+    ROOT / "Reclamos Flyer (2).png": (FLYERS / "reclamos-2.png", "crop"),
+    ROOT / "Transparencia FInancier Flyer.png": (FLYERS / "transparencia-financiera.png", "crop"),
+    ROOT / "Ingreso Seguridad Flyer.png": (FLYERS / "ingreso-seguridad.png", "crop"),
 }
 
 

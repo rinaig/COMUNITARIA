@@ -188,6 +188,26 @@ export function PortalAccessGuard({ requiredRole, children }: PortalAccessGuardP
     );
   }
 
+  if (profile.estado === "rechazado") {
+    return (
+      <div className="glass-panel rounded-[2rem] p-8">
+        <p className="text-sm font-semibold text-rose-700">Solicitud rechazada</p>
+        <h2 className="mt-3 text-3xl font-semibold text-slate-950">
+          Tu acceso fue rechazado por la administracion.
+        </h2>
+        <p className="mt-3 max-w-2xl text-base leading-8 text-slate-600">
+          Si necesitas corregir datos o volver a solicitar acceso para {tenant?.nombre ?? "este consorcio"}, contacta a la administracion antes de reintentar el alta.
+        </p>
+        {tenant?.contacto_email || tenant?.contacto_telefono ? <div className="mt-4 grid gap-2 text-sm leading-7 text-slate-600"><p>Email de contacto: {tenant?.contacto_email ?? "No configurado"}</p><p>Telefono de contacto: {tenant?.contacto_telefono ?? "No configurado"}</p></div> : null}
+        <div className="mt-6 flex flex-wrap gap-3">
+          <Link className="button-primary" href="/auth">
+            Revisar mi alta
+          </Link>
+        </div>
+      </div>
+    );
+  }
+
   if (profile.estado !== "activo") {
     return (
       <div className="glass-panel rounded-[2rem] p-8">
@@ -198,6 +218,7 @@ export function PortalAccessGuard({ requiredRole, children }: PortalAccessGuardP
         <p className="mt-3 max-w-2xl text-base leading-8 text-slate-600">
           El administrador del consorcio {tenant?.nombre ?? "seleccionado"} debe revisar tu alta antes de habilitar el portal.
         </p>
+        {tenant?.contacto_email || tenant?.contacto_telefono ? <div className="mt-4 grid gap-2 text-sm leading-7 text-slate-600"><p>Email de contacto: {tenant?.contacto_email ?? "No configurado"}</p><p>Telefono de contacto: {tenant?.contacto_telefono ?? "No configurado"}</p></div> : null}
         {requiredRole === "admin" && tenant?.trial_unit_limit ? <p className="mt-3 text-sm leading-7 text-emerald-700">Durante la prueba inicial puedes operar hasta {tenant.trial_unit_limit} unidades y {tenant.trial_guard_post_limit} puesto de vigilancia.</p> : null}
         <div className="mt-6 flex flex-wrap gap-3">
           <Link className="button-secondary" href="/auth">

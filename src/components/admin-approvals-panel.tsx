@@ -17,24 +17,64 @@ export function AdminApprovalsPanel() {
   const configured = isSupabaseConfigured();
   const [session, setSession] = useState<Session | null>(null);
   const [pendingResidents, setPendingResidents] = useState<PendingResident[]>([]);
+  const [scopeMessage, setScopeMessage] = useState("");
   const [loading, setLoading] = useState(() => configured);
   const [busyProfileId, setBusyProfileId] = useState<string | null>(null);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
 
-  const loadPendingResidents = useCallback(async () => {
+  const loadPendingResidents = useCallback(async (userId: string) => {
     if (!supabase) {
       return;
     }
 
     setLoading(true);
 
-    const { data, error: loadError } = await supabase
+    const { data: actingProfile, error: actingProfileError } = await supabase
+      .from("profiles")
+      .select("consorcio_id, rol")
+      .eq("id", userId)
+      .maybeSingle();
+
+    if (actingProfileError) {
+      setError(actingProfileError.message);
+      setLoading(false);
+      return;
+    }
+
+    const actingRole = (actingProfile as Pick<ProfileRecord, "rol" | "consorcio_id"> | null)?.rol ?? null;
+    const actingConsorcioId = (actingProfile as Pick<ProfileRecord, "rol" | "consorcio_id"> | null)?.consorcio_id ?? null;
+
+    if (actingRole !== "admin" && actingRole !== "superadmin") {
+      setError("La sesion actual no tiene permisos para revisar solicitudes.");
+      setPendingResidents([]);
+      setLoading(false);
+      return;
+    }
+
+    if (actingRole !== "superadmin" && !actingConsorcioId) {
+      setError("Tu perfil no esta vinculado a un consorcio para revisar solicitudes.");
+      setPendingResidents([]);
+      setLoading(false);
+      return;
+    }
+
+    setScopeMessage(
+      actingRole === "superadmin"
+        ? "Se muestran solicitudes pendientes de toda la plataforma."
+        : "Se muestran solo las solicitudes pendientes vinculadas a tu consorcio.",
+    );
+
+    const query = supabase
       .from("profiles")
       .select("id, nombre, apellido, email, telefono, dni, unidad_funcional, estado, rol, es_menor, adulto_responsable_email")
       .eq("estado", "pendiente")
       .in("rol", ["residente", "admin"])
       .order("created_at", { ascending: true });
+
+    const { data, error: loadError } = actingRole === "superadmin"
+      ? await query
+      : await query.eq("consorcio_id", actingConsorcioId);
 
     if (loadError) {
       setError(loadError.message);
@@ -69,7 +109,7 @@ export function AdminApprovalsPanel() {
       setSession(data.session ?? null);
 
       if (data.session?.user) {
-        await loadPendingResidents();
+        await loadPendingResidents(data.session.user.id);
       } else {
         setLoading(false);
       }
@@ -108,7 +148,9 @@ export function AdminApprovalsPanel() {
         ? `${nextRole === "admin" ? "Administrador" : "Residente"} aprobado y listo para ingresar.`
         : "Solicitud rechazada correctamente.",
     );
-    await loadPendingResidents();
+    if (session?.user) {
+      await loadPendingResidents(session.user.id);
+    }
     setBusyProfileId(null);
   }
 
@@ -131,6 +173,8 @@ export function AdminApprovalsPanel() {
           Este panel consume datos reales desde Supabase y permite activar o rechazar residentes y administradores en estado pendiente.
         </p>
       </div>
+
+      {scopeMessage ? <p className="mt-4 text-sm leading-7 text-slate-500">{scopeMessage}</p> : null}
 
       {error ? (
         <article className="role-card mt-6 border-amber-200 bg-amber-50/80">

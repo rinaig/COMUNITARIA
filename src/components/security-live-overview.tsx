@@ -75,9 +75,12 @@ export function SecurityLiveOverview() {
   const [providerAlerts, setProviderAlerts] = useState<Array<{ title: string; detail: string; status: string }>>([]);
   const [entries, setEntries] = useState<Entry[]>([]);
   const [posts, setPosts] = useState<GuardPost[]>([]);
+  const [providers, setProviders] = useState<Provider[]>([]);
   const [selectedPointId, setSelectedPointId] = useState("");
+  const [selectedProviderId, setSelectedProviderId] = useState("");
   const [token, setToken] = useState("");
   const [entryNote, setEntryNote] = useState("");
+  const [providerEntryNote, setProviderEntryNote] = useState("");
 
   const stopScanner = useCallback(() => {
     streamRef.current?.getTracks().forEach((track) => track.stop());
@@ -121,13 +124,16 @@ export function SecurityLiveOverview() {
     const guardAssignments = (assignmentsResult.data as GuardAssignment[] | null) ?? [];
     const assignedPointIds = new Set(guardAssignments.map((item) => item.punto_id));
     const visiblePosts = assignedPointIds.size > 0 ? allPosts.filter((item) => assignedPointIds.has(item.id)) : allPosts;
+    const nextProviders = (providersResult.data as Provider[] | null) ?? [];
     setPosts(visiblePosts);
     setSelectedPointId((current) => current || visiblePosts[0]?.id || "");
+    setProviders(nextProviders);
+    setSelectedProviderId((current) => current || nextProviders[0]?.id || "");
 
     const nextVisits = ((visitsResult.data as Visit[] | null) ?? []).filter((item) => !visiblePosts.length || !item.punto_vigilancia_id || visiblePosts.some((post) => post.id === item.punto_vigilancia_id));
     const nextDocs = (providerDocsResult.data as ProviderDoc[] | null) ?? [];
     const requirements = (requirementsResult.data as ProviderRequirement[] | null) ?? [];
-    const providers = ((providersResult.data as Provider[] | null) ?? []).reduce<Record<string, Provider>>((acc, item) => {
+    const providersById = nextProviders.reduce<Record<string, Provider>>((acc, item) => {
       acc[item.id] = item;
       return acc;
     }, {});
@@ -138,7 +144,7 @@ export function SecurityLiveOverview() {
       return acc;
     }, {});
 
-    const providerAlertsRaw = Object.values(providers).flatMap((provider) => {
+    const providerAlertsRaw = Object.values(providersById).flatMap((provider) => {
       const providerDocs = providerDocsByProvider[provider.id] ?? [];
       const docsByRequirement = new Map(providerDocs.map((doc) => [doc.requisito_id ?? doc.tipo, doc]));
 
@@ -227,6 +233,41 @@ export function SecurityLiveOverview() {
     }
     setValidating(false);
   }, [entryNote, loadOverview, selectedPointId, session, stopScanner, supabase]);
+
+  const registerProviderEntry = useCallback(async () => {
+    if (!supabase) {
+      return;
+    }
+
+    if (!selectedProviderId) {
+      setError("Selecciona un proveedor para registrar el ingreso.");
+      return;
+    }
+
+    setValidating(true);
+    setError("");
+    setMessage("");
+
+    const { data, error: providerEntryError } = await supabase.rpc("register_provider_entry", {
+      p_proveedor_id: selectedProviderId,
+      p_note: providerEntryNote,
+      p_punto_vigilancia_id: selectedPointId || null,
+    });
+
+    if (providerEntryError) {
+      setError(providerEntryError.message);
+      setValidating(false);
+      return;
+    }
+
+    const providerName = Array.isArray(data) ? data[0]?.provider_name : undefined;
+    setProviderEntryNote("");
+    setMessage(providerName ? `Ingreso registrado para proveedor ${providerName}.` : "Ingreso de proveedor registrado correctamente.");
+    if (session?.user) {
+      await loadOverview(session.user.id);
+    }
+    setValidating(false);
+  }, [loadOverview, providerEntryNote, selectedPointId, selectedProviderId, session, supabase]);
 
   const startScanner = useCallback(async () => {
     if (!window.BarcodeDetector || !navigator.mediaDevices?.getUserMedia) {
@@ -375,6 +416,20 @@ export function SecurityLiveOverview() {
             </label>
             <button className="button-primary self-end" disabled={validating} type="submit">{validating ? "Validando..." : "Registrar ingreso"}</button>
           </form>
+          <article className="role-card mt-4 grid gap-4 lg:grid-cols-[1fr_1fr_auto]">
+            <label>
+              <span className="field-label">Proveedor</span>
+              <select className="field-select mt-2" onChange={(event) => setSelectedProviderId(event.target.value)} value={selectedProviderId}>
+                <option value="">Selecciona un proveedor</option>
+                {providers.map((provider) => <option key={provider.id} value={provider.id}>{provider.nombre}{provider.empresa ? ` · ${provider.empresa}` : ""}</option>)}
+              </select>
+            </label>
+            <label>
+              <span className="field-label">Observacion proveedor</span>
+              <input className="field mt-2" onChange={(event) => setProviderEntryNote(event.target.value)} placeholder="Ej: mantenimiento ascensor torre A" value={providerEntryNote} />
+            </label>
+            <button className="button-primary self-end" disabled={validating || providers.length === 0} onClick={() => void registerProviderEntry()} type="button">{validating ? "Validando..." : "Registrar proveedor"}</button>
+          </article>
           <article className="role-card mt-6">
             <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
               <div>

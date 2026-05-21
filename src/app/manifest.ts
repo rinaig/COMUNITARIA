@@ -5,7 +5,7 @@ export default function manifest(): MetadataRoute.Manifest {
     name: "Comunitaria",
     short_name: "Comunitaria",
     description:
-      "SaaS multi-tenant para gestion de consorcios, barrios privados, reservas, reclamos y accesos.",
+      "Plataforma para gestionar consorcios, barrios privados, reservas, reclamos, accesos y operacion diaria.",
     start_url: "/",
     display: "standalone",
     background_color: "#F3F4F6",

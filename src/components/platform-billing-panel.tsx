@@ -1,18 +1,20 @@
 "use client";
 
+import Image from "next/image";
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
 import type { Session } from "@supabase/supabase-js";
 import type { ProfileRecord } from "@/lib/auth-types";
+import { CollapsiblePanelSection } from "@/components/collapsible-panel-section";
+import { HOME_CONTENT_STORAGE_KEY, HOME_IMAGE_OPTIONS, normalizeHomeContent, type HomeContentConfig, type HomeModuleContent } from "@/lib/home-content";
 import { getSupabaseBrowserClient, isSupabaseConfigured } from "@/lib/supabase";
+import { getCompatIssueMessage, loadPlatformSettingsCompat, savePlatformSettingsCompat, type PlatformSettingsCompatRow } from "@/lib/platform-schema-compat";
 
 type Tenant = {
   id: string;
   nombre: string;
   cantidad_unidades: number;
-};
-
-type PlatformSettingsRow = {
-  default_unit_price: number;
+  trial_unit_limit: number;
+  trial_guard_post_limit: number;
 };
 
 type SubscriptionRow = {
@@ -23,6 +25,7 @@ type SubscriptionRow = {
   estado: "trial" | "activa" | "past_due" | "pausada" | "cancelada";
   precio_lista_por_unidad: number;
   unit_price_override: number | null;
+  trial_expires_at: string | null;
   proximo_vencimiento: string | null;
   observaciones: string | null;
   ultimo_pago_at: string | null;
@@ -84,6 +87,14 @@ function getEffectiveUnitPrice(subscription: SubscriptionRow | null, defaultUnit
   return Number(subscription.unit_price_override ?? subscription.precio_lista_por_unidad ?? Number(defaultUnitPrice || 0));
 }
 
+function getTrialExpiryValue(value: string) {
+  if (!value) {
+    return null;
+  }
+
+  return new Date(`${value}T23:59:59`).toISOString();
+}
+
 export function PlatformBillingPanel() {
   const supabase = useMemo(() => getSupabaseBrowserClient(), []);
   const configured = isSupabaseConfigured();
@@ -91,27 +102,43 @@ export function PlatformBillingPanel() {
   const [profile, setProfile] = useState<ProfileRecord | null>(null);
   const [loading, setLoading] = useState(() => configured);
   const [savingGlobalPrice, setSavingGlobalPrice] = useState(false);
+  const [savingHomeContent, setSavingHomeContent] = useState(false);
   const [savingSubscription, setSavingSubscription] = useState(false);
   const [reviewingPaymentId, setReviewingPaymentId] = useState<string | null>(null);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
+  const [schemaWarning, setSchemaWarning] = useState("");
+  const [billingWarning, setBillingWarning] = useState("");
   const [tenants, setTenants] = useState<Tenant[]>([]);
   const [subscriptions, setSubscriptions] = useState<SubscriptionRow[]>([]);
   const [payments, setPayments] = useState<PaymentRow[]>([]);
   const [selectedTenantId, setSelectedTenantId] = useState("");
   const [defaultUnitPrice, setDefaultUnitPrice] = useState("0");
+  const [supportEmail, setSupportEmail] = useState("");
+  const [supportPhone, setSupportPhone] = useState("");
+  const [instagramUrl, setInstagramUrl] = useState("");
+  const [linkedinUrl, setLinkedinUrl] = useState("");
+  const [xUrl, setXUrl] = useState("");
+  const [facebookUrl, setFacebookUrl] = useState("");
   const [plan, setPlan] = useState<SubscriptionRow["plan"]>("base");
   const [subscriptionStatus, setSubscriptionStatus] = useState<SubscriptionRow["estado"]>("trial");
+  const [trialExpiryDate, setTrialExpiryDate] = useState("");
   const [nextDueDate, setNextDueDate] = useState("");
   const [subscriptionNotes, setSubscriptionNotes] = useState("");
   const [specialUnitPrice, setSpecialUnitPrice] = useState("");
+  const [trialUnitLimit, setTrialUnitLimit] = useState("3");
+  const [trialGuardPostLimit, setTrialGuardPostLimit] = useState("1");
+  const [homeContent, setHomeContent] = useState<HomeContentConfig>(() => normalizeHomeContent(undefined));
 
-  const syncSelectedSubscriptionForm = useCallback((subscription: SubscriptionRow | null) => {
+  const syncSelectedSubscriptionForm = useCallback((subscription: SubscriptionRow | null, tenant: Tenant | null) => {
     setPlan(subscription?.plan ?? "base");
     setSubscriptionStatus(subscription?.estado ?? "trial");
+    setTrialExpiryDate(subscription?.trial_expires_at ? subscription.trial_expires_at.slice(0, 10) : "");
     setNextDueDate(subscription?.proximo_vencimiento ?? "");
     setSubscriptionNotes(subscription?.observaciones ?? "");
     setSpecialUnitPrice(subscription?.unit_price_override == null ? "" : String(subscription.unit_price_override));
+    setTrialUnitLimit(String(tenant?.trial_unit_limit ?? 3));
+    setTrialGuardPostLimit(String(tenant?.trial_guard_post_limit ?? 1));
   }, []);
 
   const loadData = useCallback(async (userId: string) => {
@@ -121,6 +148,8 @@ export function PlatformBillingPanel() {
 
     setLoading(true);
     setError("");
+    setSchemaWarning("");
+    setBillingWarning("");
 
     const { data: profileData, error: profileError } = await supabase
       .from("profiles")
@@ -142,32 +171,79 @@ export function PlatformBillingPanel() {
       return;
     }
 
-    const [settingsResult, tenantsResult, subscriptionsResult, paymentsResult] = await Promise.all([
-      supabase.from("platform_settings").select("default_unit_price").eq("id", true).maybeSingle(),
-      supabase.from("consorcios").select("id, nombre, cantidad_unidades").order("nombre", { ascending: true }),
-      supabase.from("consorcio_suscripciones").select("id, consorcio_id, admin_id, plan, estado, precio_lista_por_unidad, unit_price_override, proximo_vencimiento, observaciones, ultimo_pago_at").order("created_at", { ascending: false }),
-      supabase.from("admin_payment_events").select("id, suscripcion_id, consorcio_id, importe, estado, metodo, referencia, fecha_pago, nota, created_at").order("created_at", { ascending: false }).limit(30),
-    ]);
-
-    const firstError = [settingsResult.error, tenantsResult.error, subscriptionsResult.error, paymentsResult.error].find(Boolean);
-    if (firstError) {
-      setError(firstError.message);
+    const settingsCompat = await loadPlatformSettingsCompat(supabase);
+    if (settingsCompat.error) {
+      setError(settingsCompat.error);
       setLoading(false);
       return;
     }
 
-    const settings = (settingsResult.data as PlatformSettingsRow | null) ?? { default_unit_price: 0 };
-    const nextTenants = (tenantsResult.data as Tenant[] | null) ?? [];
-    const nextSubscriptions = (subscriptionsResult.data as SubscriptionRow[] | null) ?? [];
+    const settings = settingsCompat.data;
 
     setDefaultUnitPrice(String(settings.default_unit_price ?? 0));
-    setTenants(nextTenants);
-    setSubscriptions(nextSubscriptions);
-    setPayments((paymentsResult.data as PaymentRow[] | null) ?? []);
+    setSupportEmail(settings.support_email ?? "");
+    setSupportPhone(settings.support_phone ?? "");
+    setInstagramUrl(settings.instagram_url ?? "");
+    setLinkedinUrl(settings.linkedin_url ?? "");
+    setXUrl(settings.x_url ?? "");
+    setFacebookUrl(settings.facebook_url ?? "");
+    setHomeContent(settings.home_content);
+    setSchemaWarning(settingsCompat.warning ?? "");
+
+    const [tenantsResult, subscriptionsResult, paymentsResult] = await Promise.allSettled([
+      supabase.from("consorcios").select("id, nombre, cantidad_unidades, trial_unit_limit, trial_guard_post_limit").order("nombre", { ascending: true }),
+      supabase.from("consorcio_suscripciones").select("id, consorcio_id, admin_id, plan, estado, precio_lista_por_unidad, unit_price_override, trial_expires_at, proximo_vencimiento, observaciones, ultimo_pago_at").order("created_at", { ascending: false }),
+      supabase.from("admin_payment_events").select("id, suscripcion_id, consorcio_id, importe, estado, metodo, referencia, fecha_pago, nota, created_at").order("created_at", { ascending: false }).limit(30),
+    ]);
+
+    const warnings: string[] = [];
+    let nextTenants: Tenant[] = [];
+    let nextSubscriptions: SubscriptionRow[] = [];
+
+    if (tenantsResult.status === "fulfilled") {
+      if (tenantsResult.value.error) {
+        warnings.push(getCompatIssueMessage("Consorcios", tenantsResult.value.error));
+      } else {
+        nextTenants = (tenantsResult.value.data as Tenant[] | null) ?? [];
+        setTenants(nextTenants);
+      }
+    } else {
+      warnings.push(getCompatIssueMessage("Consorcios", tenantsResult.reason));
+    }
+
+    if (subscriptionsResult.status === "fulfilled") {
+      if (subscriptionsResult.value.error) {
+        warnings.push(getCompatIssueMessage("Suscripciones", subscriptionsResult.value.error));
+      } else {
+        nextSubscriptions = (subscriptionsResult.value.data as SubscriptionRow[] | null) ?? [];
+        setSubscriptions(nextSubscriptions);
+      }
+    } else {
+      warnings.push(getCompatIssueMessage("Suscripciones", subscriptionsResult.reason));
+    }
+
+    if (paymentsResult.status === "fulfilled") {
+      if (paymentsResult.value.error) {
+        warnings.push(getCompatIssueMessage("Pagos", paymentsResult.value.error));
+      } else {
+        setPayments((paymentsResult.value.data as PaymentRow[] | null) ?? []);
+      }
+    } else {
+      warnings.push(getCompatIssueMessage("Pagos", paymentsResult.reason));
+    }
+
+    if (warnings.length > 0) {
+      setBillingWarning(warnings.join(" "));
+    }
 
     const nextSelectedTenantId = selectedTenantId || nextTenants[0]?.id || "";
-    setSelectedTenantId(nextSelectedTenantId);
-    syncSelectedSubscriptionForm(nextSubscriptions.find((item) => item.consorcio_id === nextSelectedTenantId) ?? null);
+    if (nextSelectedTenantId) {
+      setSelectedTenantId(nextSelectedTenantId);
+      syncSelectedSubscriptionForm(
+        nextSubscriptions.find((item) => item.consorcio_id === nextSelectedTenantId) ?? null,
+        nextTenants.find((item) => item.id === nextSelectedTenantId) ?? null,
+      );
+    }
 
     setLoading(false);
   }, [selectedTenantId, supabase, syncSelectedSubscriptionForm]);
@@ -205,10 +281,46 @@ export function PlatformBillingPanel() {
   const selectedTenant = tenants.find((item) => item.id === selectedTenantId) ?? null;
   const effectiveUnitPrice = getEffectiveUnitPrice(selectedSubscription, defaultUnitPrice);
   const estimatedMonthly = effectiveUnitPrice * Number(selectedTenant?.cantidad_unidades ?? 0);
+  const linkedinPendingMigration = schemaWarning.toLowerCase().includes("linkedin");
+
+  function buildSettingsPayload(): PlatformSettingsCompatRow {
+    return {
+      default_unit_price: Number(defaultUnitPrice || 0),
+      support_email: supportEmail.trim() || null,
+      support_phone: supportPhone.trim() || null,
+      instagram_url: instagramUrl.trim() || null,
+      linkedin_url: linkedinUrl.trim() || null,
+      x_url: xUrl.trim() || null,
+      facebook_url: facebookUrl.trim() || null,
+      home_content: homeContent,
+    };
+  }
+
+  function persistHomeContentPreview(nextHomeContent: HomeContentConfig) {
+    try {
+      window.localStorage.setItem(HOME_CONTENT_STORAGE_KEY, JSON.stringify(nextHomeContent));
+    } catch {
+      // ignore local preview persistence errors
+    }
+  }
+
+  function updateHomeContentField<K extends keyof HomeContentConfig>(field: K, value: HomeContentConfig[K]) {
+    setHomeContent((current) => ({ ...current, [field]: value }));
+  }
+
+  function updateHomeModule(moduleId: HomeModuleContent["id"], updater: (module: HomeModuleContent) => HomeModuleContent) {
+    setHomeContent((current) => ({
+      ...current,
+      modules: current.modules.map((module) => module.id === moduleId ? updater(module) : module),
+    }));
+  }
 
   function handleTenantSelection(nextTenantId: string) {
     setSelectedTenantId(nextTenantId);
-    syncSelectedSubscriptionForm(subscriptions.find((item) => item.consorcio_id === nextTenantId) ?? null);
+    syncSelectedSubscriptionForm(
+      subscriptions.find((item) => item.consorcio_id === nextTenantId) ?? null,
+      tenants.find((item) => item.id === nextTenantId) ?? null,
+    );
   }
 
   async function handleDefaultUnitPriceSubmit(event: FormEvent<HTMLFormElement>) {
@@ -221,30 +333,63 @@ export function PlatformBillingPanel() {
     setError("");
     setMessage("");
 
-    const { error: saveError } = await supabase
-      .from("platform_settings")
-      .update({ default_unit_price: Number(defaultUnitPrice || 0) })
-      .eq("id", true);
+    const saveResult = await savePlatformSettingsCompat(supabase, buildSettingsPayload());
 
-    if (saveError) {
-      setError(saveError.message);
+    if (saveResult.error) {
+      setError(saveResult.error);
       setSavingGlobalPrice(false);
       return;
     }
 
+    setSchemaWarning(saveResult.warning ?? schemaWarning);
+
     const subscriptionIdsWithoutOverride = subscriptions.filter((item) => item.unit_price_override == null).map((item) => item.id);
     if (subscriptionIdsWithoutOverride.length > 0) {
-      await supabase
+      const { error: defaultPriceError } = await supabase
         .from("consorcio_suscripciones")
         .update({ precio_lista_por_unidad: Number(defaultUnitPrice || 0) })
         .in("id", subscriptionIdsWithoutOverride);
+
+      if (defaultPriceError) {
+        setBillingWarning(getCompatIssueMessage("Suscripciones", defaultPriceError));
+      } else {
+        setSubscriptions((current) => current.map((item) => item.unit_price_override == null ? { ...item, precio_lista_por_unidad: Number(defaultUnitPrice || 0) } : item));
+      }
     }
 
-    setMessage("Precio general por unidad actualizado.");
-    if (session?.user) {
-      await loadData(session.user.id);
-    }
+    setMessage("Configuracion general de plataforma actualizada.");
     setSavingGlobalPrice(false);
+  }
+
+  async function handleHomeContentSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!supabase) {
+      return;
+    }
+
+    setSavingHomeContent(true);
+    setError("");
+    setMessage("");
+
+    const normalizedHomeContent = normalizeHomeContent(homeContent);
+    const saveResult = await savePlatformSettingsCompat(supabase, {
+      ...buildSettingsPayload(),
+      home_content: normalizedHomeContent,
+    });
+
+    if (saveResult.error) {
+      setError(saveResult.error);
+      setSavingHomeContent(false);
+      return;
+    }
+
+    setHomeContent(normalizedHomeContent);
+    persistHomeContentPreview(normalizedHomeContent);
+    setSchemaWarning(saveResult.warning ?? schemaWarning);
+    setMessage(saveResult.warning?.toLowerCase().includes("home")
+      ? "Contenido del home actualizado. Esta sesion local ya muestra la nueva portada."
+      : "Contenido del home actualizado.");
+    setSavingHomeContent(false);
   }
 
   async function handleSubscriptionSubmit(event: FormEvent<HTMLFormElement>) {
@@ -257,6 +402,21 @@ export function PlatformBillingPanel() {
     setError("");
     setMessage("");
 
+    const parsedTrialUnitLimit = Number.parseInt(trialUnitLimit, 10);
+    const parsedTrialGuardPostLimit = Number.parseInt(trialGuardPostLimit, 10);
+
+    if (Number.isNaN(parsedTrialUnitLimit) || parsedTrialUnitLimit < 0) {
+      setError("El limite de unidades de prueba debe ser un entero igual o mayor a 0.");
+      setSavingSubscription(false);
+      return;
+    }
+
+    if (Number.isNaN(parsedTrialGuardPostLimit) || parsedTrialGuardPostLimit < 0) {
+      setError("El limite de puestos de vigilancia de prueba debe ser un entero igual o mayor a 0.");
+      setSavingSubscription(false);
+      return;
+    }
+
     const overrideValue = specialUnitPrice.trim() === "" ? null : Number(specialUnitPrice);
     const nextEffectiveUnitPrice = overrideValue ?? Number(defaultUnitPrice || 0);
     const payload = {
@@ -267,9 +427,24 @@ export function PlatformBillingPanel() {
       precio_lista_por_unidad: Number(defaultUnitPrice || 0),
       unit_price_override: overrideValue,
       monto_mensual: nextEffectiveUnitPrice * Number(selectedTenant?.cantidad_unidades ?? 0),
+      trial_expires_at: getTrialExpiryValue(trialExpiryDate),
       proximo_vencimiento: nextDueDate || null,
       observaciones: subscriptionNotes || null,
     };
+
+    const { error: tenantUpdateError } = await supabase
+      .from("consorcios")
+      .update({
+        trial_unit_limit: parsedTrialUnitLimit,
+        trial_guard_post_limit: parsedTrialGuardPostLimit,
+      })
+      .eq("id", selectedTenantId);
+
+    if (tenantUpdateError) {
+      setError(tenantUpdateError.message);
+      setSavingSubscription(false);
+      return;
+    }
 
     const query = selectedSubscription
       ? supabase.from("consorcio_suscripciones").update(payload).eq("id", selectedSubscription.id)
@@ -335,44 +510,99 @@ export function PlatformBillingPanel() {
   }
 
   return (
-    <section className="mt-6 glass-panel rounded-[2rem] p-6 lg:p-8">
-      <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
-        <div>
-          <p className="text-xs uppercase tracking-[0.28em] text-slate-500">Facturacion base</p>
-          <h3 className="mt-3 text-3xl font-semibold tracking-[-0.04em] text-slate-950">Suscripciones y pagos de administradores</h3>
-        </div>
-      </div>
-
+    <div>
       {error ? <article className="role-card mt-6 border-amber-200 bg-amber-50/80"><p className="text-sm font-semibold text-amber-700">Error</p><p className="mt-2 text-sm leading-7 text-amber-700">{error}</p></article> : null}
+      {schemaWarning ? <article className="role-card mt-6 border-slate-200 bg-slate-50/80"><p className="text-sm font-semibold text-slate-700">Compatibilidad</p><p className="mt-2 text-sm leading-7 text-slate-600">{schemaWarning}</p></article> : null}
+      {billingWarning ? <article className="role-card mt-6 border-slate-200 bg-slate-50/80"><p className="text-sm font-semibold text-slate-700">Facturacion comercial</p><p className="mt-2 text-sm leading-7 text-slate-600">{billingWarning}</p></article> : null}
       {message ? <article className="role-card mt-6 border-emerald-200 bg-emerald-50/80"><p className="text-sm font-semibold text-emerald-700">Estado</p><p className="mt-2 text-sm leading-7 text-emerald-700">{message}</p></article> : null}
-
-      <div className="mt-6 grid gap-6 2xl:grid-cols-[0.9fr_1.1fr]">
-        <div className="grid gap-6">
-          <form className="role-card grid gap-4" onSubmit={handleDefaultUnitPriceSubmit}>
-            <p className="text-sm uppercase tracking-[0.2em] text-slate-500">Precio general por unidad</p>
-            <label><span className="field-label">Monto general</span><input className="field mt-2" min="0" onChange={(event) => setDefaultUnitPrice(event.target.value)} required step="0.01" type="number" value={defaultUnitPrice} /></label>
-            <button className="button-primary" disabled={savingGlobalPrice || loading} type="submit">{savingGlobalPrice ? "Guardando..." : "Guardar monto general"}</button>
-          </form>
-
-          <form className="role-card grid gap-4" onSubmit={handleSubscriptionSubmit}>
-            <p className="text-sm uppercase tracking-[0.2em] text-slate-500">Plan especial por consorcio</p>
-            <label><span className="field-label">Consorcio</span><select className="field-select mt-2" onChange={(event) => handleTenantSelection(event.target.value)} value={selectedTenantId}>{tenants.map((item) => <option key={item.id} value={item.id}>{item.nombre}</option>)}</select></label>
-            <label><span className="field-label">Plan</span><select className="field-select mt-2" onChange={(event) => setPlan(event.target.value as SubscriptionRow["plan"])} value={plan}>{planOptions.map((item) => <option key={item} value={item}>{item}</option>)}</select></label>
-            <label><span className="field-label">Estado comercial</span><select className="field-select mt-2" onChange={(event) => setSubscriptionStatus(event.target.value as SubscriptionRow["estado"])} value={subscriptionStatus}>{subscriptionStatusOptions.map((item) => <option key={item} value={item}>{item}</option>)}</select></label>
-            <label><span className="field-label">Monto general vigente</span><input className="field mt-2" disabled value={`$ ${Number(defaultUnitPrice || 0).toLocaleString("es-AR")}`} /></label>
-            <label><span className="field-label">Monto especial por unidad</span><input className="field mt-2" min="0" onChange={(event) => setSpecialUnitPrice(event.target.value)} placeholder="Dejar vacio para usar el general" step="0.01" type="number" value={specialUnitPrice} /></label>
-            <label><span className="field-label">Proximo vencimiento</span><input className="field mt-2" onChange={(event) => setNextDueDate(event.target.value)} type="date" value={nextDueDate} /></label>
-            <label><span className="field-label">Observaciones</span><textarea className="field-textarea mt-2" onChange={(event) => setSubscriptionNotes(event.target.value)} value={subscriptionNotes} /></label>
-            <div className="rounded-2xl border border-slate-200 bg-white/80 p-4">
-              <p className="text-sm uppercase tracking-[0.18em] text-slate-400">Aplicacion del precio</p>
-              <p className="mt-3 text-2xl font-semibold text-slate-950">$ {effectiveUnitPrice.toLocaleString("es-AR")}</p>
-              <p className="mt-2 text-sm leading-7 text-slate-600">{specialUnitPrice.trim() === "" ? "Usa el monto general." : "Usa un plan especial para este consorcio."} Total estimado: $ {estimatedMonthly.toLocaleString("es-AR")}.</p>
+      <CollapsiblePanelSection defaultOpen eyebrow="Home publico" subtitle="Aqui defines el texto definitivo de la portada, el modal de bienvenida y los 6 modulos inferiores. Los cambios quedan listos para la vista local y, cuando la base tenga la migracion, tambien se persistiran en platform_settings." title="Portada, bienvenida y modulos configurables">
+        <form className="grid gap-6" onSubmit={handleHomeContentSubmit}>
+          <div className="grid gap-6 xl:grid-cols-[0.95fr_1.05fr]">
+            <div className="role-card grid gap-4">
+              <p className="text-sm uppercase tracking-[0.2em] text-slate-500">Hero y modal</p>
+              <label><span className="field-label">Bajada superior</span><input className="field mt-2" onChange={(event) => updateHomeContentField("heroEyebrow", event.target.value)} value={homeContent.heroEyebrow} /></label>
+              <label><span className="field-label">Titulo principal</span><textarea className="field-textarea mt-2" onChange={(event) => updateHomeContentField("heroTitle", event.target.value)} value={homeContent.heroTitle} /></label>
+              <label><span className="field-label">Descripcion principal</span><textarea className="field-textarea mt-2" onChange={(event) => updateHomeContentField("heroDescription", event.target.value)} value={homeContent.heroDescription} /></label>
+              <label><span className="field-label">Etiqueta del recuadro visual</span><input className="field mt-2" onChange={(event) => updateHomeContentField("heroPanelEyebrow", event.target.value)} value={homeContent.heroPanelEyebrow} /></label>
+              <label><span className="field-label">Texto del recuadro visual</span><textarea className="field-textarea mt-2" onChange={(event) => updateHomeContentField("heroPanelTitle", event.target.value)} value={homeContent.heroPanelTitle} /></label>
+              <label><span className="field-label">Etiqueta del modal</span><input className="field mt-2" onChange={(event) => updateHomeContentField("welcomeEyebrow", event.target.value)} value={homeContent.welcomeEyebrow} /></label>
+              <label><span className="field-label">Titulo del modal</span><input className="field mt-2" onChange={(event) => updateHomeContentField("welcomeTitle", event.target.value)} value={homeContent.welcomeTitle} /></label>
+              <label><span className="field-label">Descripcion del modal</span><textarea className="field-textarea mt-2" onChange={(event) => updateHomeContentField("welcomeDescription", event.target.value)} value={homeContent.welcomeDescription} /></label>
+              <label><span className="field-label">Etiqueta de la seccion de modulos</span><input className="field mt-2" onChange={(event) => updateHomeContentField("modulesSectionEyebrow", event.target.value)} value={homeContent.modulesSectionEyebrow} /></label>
+              <label><span className="field-label">Titulo de la seccion de modulos</span><textarea className="field-textarea mt-2" onChange={(event) => updateHomeContentField("modulesSectionTitle", event.target.value)} value={homeContent.modulesSectionTitle} /></label>
             </div>
-            <button className="button-primary" disabled={savingSubscription || loading} type="submit">{savingSubscription ? "Guardando..." : "Guardar plan especial"}</button>
-          </form>
-        </div>
 
-        <div className="grid gap-6">
+            <div className="grid gap-4">
+              {homeContent.modules.map((module) => (
+                <article className="role-card grid gap-4" key={module.id}>
+                  <div className="flex items-start justify-between gap-4">
+                    <div>
+                      <p className="text-sm uppercase tracking-[0.2em] text-slate-500">Modulo {module.id}</p>
+                      <h4 className="mt-2 text-lg font-semibold text-slate-950">{module.title}</h4>
+                    </div>
+                    <div className="relative h-20 w-28 overflow-hidden rounded-2xl border border-slate-200 bg-white/90">
+                      <Image alt={module.alt} className="object-cover" fill sizes="112px" src={module.image} />
+                    </div>
+                  </div>
+                  <label><span className="field-label">Titulo</span><input className="field mt-2" onChange={(event) => updateHomeModule(module.id, (current) => ({ ...current, title: event.target.value }))} value={module.title} /></label>
+                  <label><span className="field-label">Descripcion corta</span><textarea className="field-textarea mt-2" onChange={(event) => updateHomeModule(module.id, (current) => ({ ...current, description: event.target.value }))} value={module.description} /></label>
+                  <label><span className="field-label">Resumen visible</span><textarea className="field-textarea mt-2" onChange={(event) => updateHomeModule(module.id, (current) => ({ ...current, summary: event.target.value }))} value={module.summary} /></label>
+                  <label><span className="field-label">Titulo del desplegable</span><input className="field mt-2" onChange={(event) => updateHomeModule(module.id, (current) => ({ ...current, detailTitle: event.target.value }))} value={module.detailTitle} /></label>
+                  <label><span className="field-label">Imagen</span><select className="field-select mt-2" onChange={(event) => updateHomeModule(module.id, (current) => ({ ...current, image: event.target.value }))} value={module.image}>{HOME_IMAGE_OPTIONS.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}</select></label>
+                  <label><span className="field-label">Texto alternativo</span><input className="field mt-2" onChange={(event) => updateHomeModule(module.id, (current) => ({ ...current, alt: event.target.value }))} value={module.alt} /></label>
+                  <label><span className="field-label">Detalle ampliado</span><textarea className="field-textarea mt-2" onChange={(event) => updateHomeModule(module.id, (current) => ({ ...current, details: event.target.value.split(/\r?\n/).map((item) => item.trim()).filter(Boolean) }))} value={module.details.join("\n")} /></label>
+                </article>
+              ))}
+            </div>
+          </div>
+
+          <div className="flex flex-wrap gap-3">
+            <button className="button-primary" disabled={savingHomeContent || loading} type="submit">{savingHomeContent ? "Guardando..." : "Guardar portada publica"}</button>
+          </div>
+        </form>
+      </CollapsiblePanelSection>
+
+      <CollapsiblePanelSection defaultOpen eyebrow="Configuracion general" subtitle="Controla los datos visibles del home, redes y valor unitario base del esquema comercial." title="Configuracion publica y precio general">
+        <form className="role-card grid gap-4" onSubmit={handleDefaultUnitPriceSubmit}>
+          <label><span className="field-label">Monto general</span><input className="field mt-2" min="0" onChange={(event) => setDefaultUnitPrice(event.target.value)} required step="0.01" type="number" value={defaultUnitPrice} /></label>
+          <label><span className="field-label">Email visible en el home</span><input className="field mt-2" onChange={(event) => setSupportEmail(event.target.value)} placeholder="soporte@comunitaria.app" type="email" value={supportEmail} /></label>
+          <label><span className="field-label">Telefono visible en el home</span><input className="field mt-2" onChange={(event) => setSupportPhone(event.target.value)} placeholder="+54 9 11 ..." type="text" value={supportPhone} /></label>
+          <label><span className="field-label">Instagram</span><input className="field mt-2" onChange={(event) => setInstagramUrl(event.target.value)} placeholder="https://instagram.com/..." type="url" value={instagramUrl} /></label>
+          <label><span className="field-label">LinkedIn</span><input className="field mt-2" onChange={(event) => setLinkedinUrl(event.target.value)} placeholder="https://linkedin.com/company/..." type="url" value={linkedinUrl} /></label>
+          {linkedinPendingMigration ? <p className="text-sm leading-7 text-slate-600">LinkedIn quedara operativo en cuanto se aplique la migracion pendiente de base de datos. El resto de la configuracion ya se guarda y se refleja normalmente.</p> : null}
+          <label><span className="field-label">X</span><input className="field mt-2" onChange={(event) => setXUrl(event.target.value)} placeholder="https://x.com/..." type="url" value={xUrl} /></label>
+          <label><span className="field-label">Facebook</span><input className="field mt-2" onChange={(event) => setFacebookUrl(event.target.value)} placeholder="https://facebook.com/..." type="url" value={facebookUrl} /></label>
+          <button className="button-primary" disabled={savingGlobalPrice || loading} type="submit">{savingGlobalPrice ? "Guardando..." : "Guardar configuracion general"}</button>
+        </form>
+      </CollapsiblePanelSection>
+
+      <CollapsiblePanelSection eyebrow="Planes por consorcio" subtitle="Ajusta la situacion comercial, topes de prueba y vencimientos de cada administrador sin recorrer toda la pagina." title="Plan especial por consorcio">
+        <form className="role-card grid gap-4" onSubmit={handleSubscriptionSubmit}>
+          <label><span className="field-label">Consorcio</span><select className="field-select mt-2" onChange={(event) => handleTenantSelection(event.target.value)} value={selectedTenantId}>{tenants.map((item) => <option key={item.id} value={item.id}>{item.nombre}</option>)}</select></label>
+          <label><span className="field-label">Plan</span><select className="field-select mt-2" onChange={(event) => setPlan(event.target.value as SubscriptionRow["plan"])} value={plan}>{planOptions.map((item) => <option key={item} value={item}>{item}</option>)}</select></label>
+          <label><span className="field-label">Estado comercial</span><select className="field-select mt-2" onChange={(event) => setSubscriptionStatus(event.target.value as SubscriptionRow["estado"])} value={subscriptionStatus}>{subscriptionStatusOptions.map((item) => <option key={item} value={item}>{item}</option>)}</select></label>
+          <label><span className="field-label">Monto general vigente</span><input className="field mt-2" disabled value={`$ ${Number(defaultUnitPrice || 0).toLocaleString("es-AR")}`} /></label>
+          <label><span className="field-label">Monto especial por unidad</span><input className="field mt-2" min="0" onChange={(event) => setSpecialUnitPrice(event.target.value)} placeholder="Dejar vacio para usar el general" step="0.01" type="number" value={specialUnitPrice} /></label>
+          <div className="grid gap-4 md:grid-cols-2">
+            <label><span className="field-label">Limite trial de unidades</span><input className="field mt-2" min="0" onChange={(event) => setTrialUnitLimit(event.target.value)} step="1" type="number" value={trialUnitLimit} /></label>
+            <label><span className="field-label">Limite trial de puestos</span><input className="field mt-2" min="0" onChange={(event) => setTrialGuardPostLimit(event.target.value)} step="1" type="number" value={trialGuardPostLimit} /></label>
+          </div>
+          <label><span className="field-label">Vencimiento de prueba</span><input className="field mt-2" onChange={(event) => setTrialExpiryDate(event.target.value)} type="date" value={trialExpiryDate} /></label>
+          <label><span className="field-label">Proximo vencimiento</span><input className="field mt-2" onChange={(event) => setNextDueDate(event.target.value)} type="date" value={nextDueDate} /></label>
+          <label><span className="field-label">Observaciones</span><textarea className="field-textarea mt-2" onChange={(event) => setSubscriptionNotes(event.target.value)} value={subscriptionNotes} /></label>
+          <div className="rounded-2xl border border-slate-200 bg-white/80 p-4">
+            <p className="text-sm uppercase tracking-[0.18em] text-slate-400">Aplicacion del precio</p>
+            <p className="mt-3 text-2xl font-semibold text-slate-950">$ {effectiveUnitPrice.toLocaleString("es-AR")}</p>
+            <p className="mt-2 text-sm leading-7 text-slate-600">{specialUnitPrice.trim() === "" ? "Usa el monto general." : "Usa un plan especial para este consorcio."} Total estimado: $ {estimatedMonthly.toLocaleString("es-AR")}.</p>
+            <p className="mt-2 text-sm leading-7 text-slate-600">Prueba operativa: hasta {trialUnitLimit || "0"} unidades funcionales y {trialGuardPostLimit || "0"} puestos de vigilancia.</p>
+            <p className="mt-2 text-sm leading-7 text-slate-600">{trialExpiryDate ? `Vence el ${new Date(`${trialExpiryDate}T00:00:00`).toLocaleDateString("es-AR")}.` : "Sin fecha de prueba definida."}</p>
+          </div>
+          <button className="button-primary" disabled={savingSubscription || loading} type="submit">{savingSubscription ? "Guardando..." : "Guardar plan especial"}</button>
+        </form>
+      </CollapsiblePanelSection>
+
+      <CollapsiblePanelSection eyebrow="Estado por consorcio" title="Suscripciones registradas y transferencias reportadas">
+        <div className="grid gap-6 2xl:grid-cols-[0.9fr_1.1fr]">
           <article className="role-card">
             <p className="text-sm uppercase tracking-[0.2em] text-slate-500">Estado por consorcio</p>
             <div className="mt-4 grid gap-3">
@@ -380,7 +610,7 @@ export function PlatformBillingPanel() {
                 const tenant = tenants.find((tenantItem) => tenantItem.id === item.consorcio_id);
                 const itemEffectiveUnitPrice = Number(item.unit_price_override ?? item.precio_lista_por_unidad ?? 0);
                 const itemMonthly = itemEffectiveUnitPrice * Number(tenant?.cantidad_unidades ?? 0);
-                return <button className="rounded-2xl border border-slate-200 bg-white/80 p-4 text-left transition-colors hover:border-slate-300" key={item.id} onClick={() => handleTenantSelection(item.consorcio_id)} type="button"><div className="flex items-start justify-between gap-3"><h4 className="text-lg font-semibold text-slate-950">{tenant?.nombre ?? item.consorcio_id}</h4><span className="status-badge status-badge--neutral">{item.estado}</span></div><p className="mt-2 text-sm leading-7 text-slate-600">Plan {item.plan} · $ {itemMonthly.toLocaleString("es-AR")}/mes</p><p className="mt-1 text-sm leading-7 text-slate-600">$ {itemEffectiveUnitPrice.toLocaleString("es-AR")} por unidad · {item.unit_price_override == null ? "General" : "Especial"}</p></button>;
+                return <button className="rounded-2xl border border-slate-200 bg-white/80 p-4 text-left transition-colors hover:border-slate-300" key={item.id} onClick={() => handleTenantSelection(item.consorcio_id)} type="button"><div className="flex items-start justify-between gap-3"><h4 className="text-lg font-semibold text-slate-950">{tenant?.nombre ?? item.consorcio_id}</h4><span className="status-badge status-badge--neutral">{item.estado}</span></div><p className="mt-2 text-sm leading-7 text-slate-600">Plan {item.plan} · $ {itemMonthly.toLocaleString("es-AR")}/mes</p><p className="mt-1 text-sm leading-7 text-slate-600">$ {itemEffectiveUnitPrice.toLocaleString("es-AR")} por unidad · {item.unit_price_override == null ? "General" : "Especial"}</p><p className="mt-1 text-sm leading-7 text-slate-600">Trial: {tenant?.trial_unit_limit ?? 3} unidades · {tenant?.trial_guard_post_limit ?? 1} puestos.</p><p className="mt-1 text-sm leading-7 text-slate-600">{item.trial_expires_at ? `Vence ${new Date(item.trial_expires_at).toLocaleDateString("es-AR")}` : "Sin fecha de prueba"}</p></button>;
               })}
             </div>
           </article>
@@ -396,7 +626,7 @@ export function PlatformBillingPanel() {
             </div>
           </article>
         </div>
-      </div>
-    </section>
+      </CollapsiblePanelSection>
+    </div>
   );
 }

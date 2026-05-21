@@ -161,7 +161,8 @@ export function ResidentClaimsPanel() {
           <label><span className="field-label">Titulo</span><input className="field mt-2" onChange={(event) => setTitle(event.target.value)} required value={title} /></label>
           <label><span className="field-label">Categoria</span><input className="field mt-2" onChange={(event) => setCategory(event.target.value)} placeholder="Ej: Iluminacion" value={category} /></label>
           <label><span className="field-label">Descripcion</span><textarea className="field-textarea mt-2" onChange={(event) => setDescription(event.target.value)} required value={description} /></label>
-          <label><span className="field-label">Foto opcional</span><input className="field mt-2" accept="image/*,.pdf" onChange={(event) => setPhotoFile(event.target.files?.[0] ?? null)} type="file" /></label>
+          <label><span className="field-label">Foto opcional</span><input className="field mt-2" accept="image/*" onChange={(event) => setPhotoFile(event.target.files?.[0] ?? null)} type="file" /></label>
+          <p className="text-sm leading-7 text-slate-600">Las imagenes se optimizan automaticamente a WebP, con ancho maximo de 1200 px y tope final de 3 MB.</p>
           <label className="rounded-2xl border border-slate-200 bg-white/80 p-4 text-sm leading-7 text-slate-600">
             <span className="flex items-center gap-3">
               <input checked={visibleToCommunity} className="h-4 w-4" onChange={(event) => setVisibleToCommunity(event.target.checked)} type="checkbox" />

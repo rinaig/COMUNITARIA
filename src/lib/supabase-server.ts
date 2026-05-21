@@ -8,13 +8,47 @@ type SupabaseEnv = {
   serviceRoleKey: string;
 };
 
+type SupabaseEnvVariable = "NEXT_PUBLIC_SUPABASE_URL" | "NEXT_PUBLIC_SUPABASE_ANON_KEY" | "SUPABASE_SERVICE_ROLE_KEY";
+
+function getEnvValue(name: SupabaseEnvVariable) {
+  return process.env[name]?.trim() ?? "";
+}
+
+export function getMissingServerSupabaseEnvNames() {
+  const missing: SupabaseEnvVariable[] = [];
+
+  if (!getEnvValue("NEXT_PUBLIC_SUPABASE_URL")) {
+    missing.push("NEXT_PUBLIC_SUPABASE_URL");
+  }
+
+  if (!getEnvValue("NEXT_PUBLIC_SUPABASE_ANON_KEY")) {
+    missing.push("NEXT_PUBLIC_SUPABASE_ANON_KEY");
+  }
+
+  if (!getEnvValue("SUPABASE_SERVICE_ROLE_KEY")) {
+    missing.push("SUPABASE_SERVICE_ROLE_KEY");
+  }
+
+  return missing;
+}
+
+export function getServerSupabaseEnvIssueMessage(scopeLabel = "el procesamiento server-side") {
+  const missing = getMissingServerSupabaseEnvNames();
+
+  if (missing.length === 0) {
+    return "";
+  }
+
+  return `Falta configuracion server-side de Supabase para ${scopeLabel}. Completa estas variables: ${missing.join(", ")}.`;
+}
+
 function getSupabaseEnv(): SupabaseEnv {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  const url = getEnvValue("NEXT_PUBLIC_SUPABASE_URL");
+  const anonKey = getEnvValue("NEXT_PUBLIC_SUPABASE_ANON_KEY");
+  const serviceRoleKey = getEnvValue("SUPABASE_SERVICE_ROLE_KEY");
 
   if (!url || !anonKey || !serviceRoleKey) {
-    throw new Error("Faltan variables de entorno de Supabase para el procesamiento server-side.");
+    throw new Error(getServerSupabaseEnvIssueMessage("el procesamiento server-side"));
   }
 
   return { url, anonKey, serviceRoleKey };

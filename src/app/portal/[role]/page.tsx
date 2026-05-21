@@ -56,7 +56,7 @@ export default async function RolePortalPage({ params }: RolePageProps) {
                 Tablero operativo conectado al consorcio autenticado.
               </h2>
               <p className="mt-4 max-w-3xl text-base leading-8 text-slate-600">
-                Esta vista ya no depende de datos de demostracion. Reclamos, gastos, anuncios, reservas y altas pendientes se leen desde Supabase segun el consorcio y el rol del administrador autenticado.
+                Reclamos, gastos, anuncios, reservas y altas pendientes se leen desde Supabase segun el consorcio y el rol del administrador autenticado.
               </p>
             </article>
 
@@ -79,7 +79,7 @@ export default async function RolePortalPage({ params }: RolePageProps) {
                     Produccion guiada por datos reales
                   </p>
                   <p className="mt-2 text-sm leading-7 text-slate-600">
-                    El contenido demostrativo queda reservado para los otros roles mientras se migran sus ultimos bloques pendientes.
+                    El acceso operativo se resuelve con sesion, rol y politicas RLS para no mezclar tenants ni exponer informacion fuera de alcance.
                   </p>
                 </div>
               </div>
@@ -113,7 +113,7 @@ export default async function RolePortalPage({ params }: RolePageProps) {
             Vista real para {roleLabels[role as AppRole].toLowerCase()} conectada al consorcio activo.
           </h2>
           <p className="mt-4 max-w-3xl text-base leading-8 text-slate-600">
-            Los paneles de este rol leen datos reales desde Supabase segun la sesion autenticada y las politicas RLS. Se retiraron las metricas simuladas de la cabecera para no confundir una demo visual con filas persistidas.
+            Los paneles de este rol leen datos reales desde Supabase segun la sesion autenticada y las politicas RLS.
           </p>
         </article>
 
@@ -136,7 +136,7 @@ export default async function RolePortalPage({ params }: RolePageProps) {
               </p>
               <p className="mt-3 text-lg font-semibold text-slate-950">Contenido respaldado por Supabase</p>
               <p className="mt-2 text-sm leading-7 text-slate-600">
-                Reclamos, visitas, reservas, chat y aprobaciones dependen del tenant autenticado. Los bloques demo estaticos se eliminaron de esta portada para evitar lecturas incoherentes.
+                Reclamos, visitas, reservas, chat y aprobaciones dependen del tenant autenticado y solo muestran informacion habilitada para el perfil actual.
               </p>
             </div>
           </div>

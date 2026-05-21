@@ -176,6 +176,7 @@ export function AdminDocumentsPanel() {
           <label><span className="field-label">Periodo de referencia</span><input className="field mt-2" onChange={(event) => setReferencePeriod(event.target.value)} placeholder="Ej: Abril 2026" value={referencePeriod} /></label>
           {kind === "liquidacion" ? <label><span className="field-label">Enlace o instruccion de pago</span><input className="field mt-2" onChange={(event) => setPaymentLink(event.target.value)} placeholder="https://..., alias o CBU" value={paymentLink} /></label> : null}
           <label><span className="field-label">Archivo</span><input className="field mt-2" accept=".pdf,image/*" onChange={(event) => setDocumentFile(event.target.files?.[0] ?? null)} required type="file" /></label>
+          <p className="text-sm leading-7 text-slate-600">Las imagenes se optimizan automaticamente a WebP con 1200 px maximo de ancho y tope final de 3 MB. Los PDF se conservan sin conversion.</p>
           <label className="flex items-center gap-3 text-sm text-slate-700"><input checked={isVisible} onChange={(event) => setIsVisible(event.target.checked)} type="checkbox" /> Visible para residentes</label>
           <button className="button-primary" disabled={saving || loading} type="submit">{saving ? "Subiendo..." : "Publicar documento"}</button>
         </form>

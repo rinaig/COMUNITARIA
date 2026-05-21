@@ -7,6 +7,7 @@ import type { Session, User } from "@supabase/supabase-js";
 import type { AppRole } from "@/lib/domain";
 import type { ProfileRecord, TenantRecord } from "@/lib/auth-types";
 import { getSupabaseBrowserClient, isSupabaseConfigured } from "@/lib/supabase";
+import { formatTrialMessage, type AdminRegistrationResult } from "@/lib/trial-copy";
 
 type AuthView = "login" | "admin" | "access";
 type AccessRole = "admin" | "residente" | "seguridad";
@@ -80,6 +81,7 @@ export function AuthClient() {
   const searchParams = useSearchParams();
   const prefillCode = searchParams.get("codigo")?.trim() ?? "";
   const prefillEmail = searchParams.get("email")?.trim().toLowerCase() ?? "";
+  const prefillUnit = searchParams.get("unidad")?.trim().toUpperCase() ?? "";
   const typeParam = searchParams.get("tipo")?.trim();
   const prefillRole: AccessRole = typeParam === "admin" ? "admin" : typeParam === "seguridad" ? "seguridad" : "residente";
 
@@ -95,6 +97,7 @@ export function AuthClient() {
   const [apellido, setApellido] = useState("");
   const [telefono, setTelefono] = useState("");
   const [dni, setDni] = useState("");
+  const [unidadFuncional, setUnidadFuncional] = useState(prefillUnit);
   const [codigoAcceso, setCodigoAcceso] = useState(prefillCode);
   const [consorcioNombre, setConsorcioNombre] = useState("");
   const [consorcioDireccion, setConsorcioDireccion] = useState("");
@@ -348,12 +351,8 @@ export function AuthClient() {
       return;
     }
 
-    const result = Array.isArray(data) ? data[0] : null;
-    setMessage(
-      result?.codigo_invitacion
-        ? `Alta completada. Codigo principal del consorcio: ${result.codigo_invitacion}. Tenes 30 dias de prueba.`
-        : "Alta completada. Ya podes operar con tu prueba inicial.",
-    );
+    const result = (Array.isArray(data) ? data[0] : null) as AdminRegistrationResult | null;
+    setMessage(formatTrialMessage(result));
 
     const nextProfile = await refreshProfile(user.id);
     navigateIfReady(nextProfile);
@@ -396,7 +395,7 @@ export function AuthClient() {
       p_apellido: apellido.trim(),
       p_telefono: telefono.trim() || null,
       p_dni: normalizeDni(dni),
-      p_unidad_funcional: null,
+      p_unidad_funcional: accessRole === "residente" ? unidadFuncional.trim().toUpperCase() || null : null,
     });
 
     if (rpcError) {
@@ -440,14 +439,14 @@ export function AuthClient() {
             Ingreso simple para administradores, usuarios y seguridad.
           </h1>
           <p className="mt-4 max-w-xl text-base leading-8 text-slate-600">
-            El administrador crea su consorcio y recibe prueba real por 30 dias. Los demas perfiles entran con codigo unico emitido por la administracion.
+            El administrador crea su consorcio, recibe el codigo principal de invitacion y comienza un periodo de prueba real. Los demas perfiles entran con un codigo unico emitido por la administracion.
           </p>
 
           <div className="mt-8 grid gap-4">
             <article className="role-card">
               <p className="text-sm font-semibold text-slate-500">Como funciona</p>
               <ul className="mt-3 grid gap-3 text-sm leading-7 text-slate-700">
-                <li>Administrador: alta directa del consorcio con prueba inicial y limites operativos.</li>
+                <li>Administrador: alta directa del consorcio con periodo de prueba real y limites operativos vigentes.</li>
                 <li>Usuario o seguridad: activacion con mail y codigo valido por 48 horas.</li>
                 <li>Los errores de rol se informan en el alta para evitar accesos al flujo equivocado.</li>
               </ul>
@@ -576,6 +575,12 @@ export function AuthClient() {
                           <span className="field-label">Codigo de acceso</span>
                           <input className="field mt-2 uppercase" onChange={(event) => setCodigoAcceso(event.target.value.toUpperCase())} required value={codigoAcceso} />
                         </label>
+                        {accessRole === "residente" ? (
+                          <label>
+                            <span className="field-label">Unidad funcional</span>
+                            <input className="field mt-2 uppercase" onChange={(event) => setUnidadFuncional(event.target.value.toUpperCase())} placeholder="Ej: UF-1A" value={unidadFuncional} />
+                          </label>
+                        ) : null}
                       </div>
 
                       <button className="button-primary" disabled={busy} type="submit">
@@ -759,6 +764,12 @@ export function AuthClient() {
                       <span className="field-label">Codigo de acceso</span>
                       <input className="field mt-2 uppercase" onChange={(event) => setCodigoAcceso(event.target.value.toUpperCase())} required value={codigoAcceso} />
                     </label>
+                    {accessRole === "residente" ? (
+                      <label>
+                        <span className="field-label">Unidad funcional</span>
+                        <input className="field mt-2 uppercase" onChange={(event) => setUnidadFuncional(event.target.value.toUpperCase())} placeholder="Ej: UF-1A" value={unidadFuncional} />
+                      </label>
+                    ) : null}
                   </div>
 
                   <button className="button-primary" disabled={busy} type="submit">

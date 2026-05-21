@@ -40,8 +40,6 @@ create table if not exists public.consorcios (
   codigo_invitacion text not null unique,
   logo_url text,
   cantidad_unidades integer not null default 0,
-  es_demo boolean not null default false,
-  demo_unit_limit integer not null default 3,
   trial_unit_limit integer not null default 3,
   trial_guard_post_limit integer not null default 1,
   contacto_email text,
@@ -50,8 +48,6 @@ create table if not exists public.consorcios (
   updated_at timestamptz not null default timezone('utc', now())
 );
 
-alter table public.consorcios add column if not exists es_demo boolean not null default false;
-alter table public.consorcios add column if not exists demo_unit_limit integer not null default 3;
 alter table public.consorcios add column if not exists tipo text not null default 'edificio';
 alter table public.consorcios add column if not exists tipo_otro text;
 alter table public.consorcios add column if not exists trial_unit_limit integer not null default 3;
@@ -160,8 +156,10 @@ create table if not exists public.platform_settings (
   support_email text,
   support_phone text,
   instagram_url text,
+  linkedin_url text,
   x_url text,
   facebook_url text,
+  home_content jsonb not null default '{}'::jsonb,
   default_unit_price numeric(12,2) not null default 0,
   transfer_alias text,
   transfer_cbu text,
@@ -198,6 +196,17 @@ create table if not exists public.admin_payment_events (
   fecha_pago timestamptz,
   fecha_vencimiento date,
   nota text,
+  created_at timestamptz not null default timezone('utc', now())
+);
+
+create table if not exists public.platform_audit_events (
+  id uuid primary key default gen_random_uuid(),
+  actor_id uuid references public.profiles(id) on delete set null,
+  action text not null,
+  target_table text not null,
+  target_id text,
+  consorcio_id uuid references public.consorcios(id) on delete set null,
+  detail jsonb not null default '{}'::jsonb,
   created_at timestamptz not null default timezone('utc', now())
 );
 
@@ -270,6 +279,15 @@ create table if not exists public.notificaciones (
   leida_at timestamptz,
   created_at timestamptz not null default timezone('utc', now()),
   check (destinatario_id is not null or rol_destino is not null)
+);
+
+create table if not exists public.notificacion_lecturas (
+  id uuid primary key default gen_random_uuid(),
+  notificacion_id uuid not null references public.notificaciones(id) on delete cascade,
+  profile_id uuid not null references public.profiles(id) on delete cascade,
+  leida_at timestamptz not null default timezone('utc', now()),
+  created_at timestamptz not null default timezone('utc', now()),
+  unique (notificacion_id, profile_id)
 );
 
 create table if not exists public.notificacion_salidas (
@@ -1032,7 +1050,7 @@ create or replace function public.complete_admin_registration(
   p_tipo text default 'edificio',
   p_tipo_otro text default null
 )
-returns table(profile_id uuid, consorcio_id uuid, codigo_invitacion text, trial_expires_at timestamptz)
+returns table(profile_id uuid, consorcio_id uuid, codigo_invitacion text, trial_expires_at timestamptz, trial_unit_limit integer, trial_guard_post_limit integer)
 language plpgsql
 security definer
 set search_path = public
@@ -1159,7 +1177,7 @@ begin
   on conflict on constraint consorcio_channel_integrations_consorcio_id_canal_key do nothing;
 
   return query
-  select current_user_id, created_consorcio_id, generated_code, trial_deadline;
+  select current_user_id, created_consorcio_id, generated_code, trial_deadline, 3, 1;
 end;
 $$;
 
@@ -1182,6 +1200,7 @@ declare
   current_profile_email text;
   roster_row public.padron_accesos_importados%rowtype;
   resolved_responsible_id uuid;
+  resolved_guard_post_id uuid;
 begin
   if current_user_id is null then
     raise exception 'Usuario no autenticado';
@@ -1229,6 +1248,16 @@ begin
     limit 1;
   end if;
 
+  if roster_row.rol_objetivo = 'seguridad' and coalesce(trim(roster_row.puesto_vigilancia), '') <> '' then
+    select id
+    into resolved_guard_post_id
+    from public.puntos_vigilancia
+    where consorcio_id = roster_row.consorcio_id
+      and activo = true
+      and lower(nombre) = lower(trim(roster_row.puesto_vigilancia))
+    limit 1;
+  end if;
+
   update public.profiles
   set
     consorcio_id = roster_row.consorcio_id,
@@ -1255,8 +1284,64 @@ begin
     updated_at = timezone('utc', now())
   where id = roster_row.id;
 
+  if resolved_guard_post_id is not null then
+    insert into public.punto_vigilancia_guardias (consorcio_id, punto_id, guardia_id)
+    values (roster_row.consorcio_id, resolved_guard_post_id, current_user_id)
+    on conflict (punto_id, guardia_id) do nothing;
+  end if;
+
   return query
   select current_user_id, roster_row.consorcio_id, roster_row.rol_objetivo, 'activo'::public.profile_status;
+end;
+$$;
+
+create or replace function public.refresh_roster_access_code(
+  p_roster_id uuid
+)
+returns table(roster_id uuid, codigo_acceso text, codigo_acceso_expires_at timestamptz)
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  current_user_id uuid := auth.uid();
+  current_access_role public.app_role := public.current_role();
+  roster_row public.padron_accesos_importados%rowtype;
+  next_code text;
+  next_expiration timestamptz := timezone('utc', now()) + interval '48 hours';
+begin
+  if current_user_id is null then
+    raise exception 'Usuario no autenticado';
+  end if;
+
+  if not public.is_superadmin() and current_access_role <> 'admin' then
+    raise exception 'No tienes permisos para regenerar codigos de acceso';
+  end if;
+
+  select *
+  into roster_row
+  from public.padron_accesos_importados
+  where id = p_roster_id
+    and (
+      public.is_superadmin()
+      or consorcio_id = public.current_consorcio_id()
+    )
+  limit 1;
+
+  if roster_row.id is null then
+    raise exception 'No se encontro el registro del padron';
+  end if;
+
+  next_code := public.generate_access_code();
+
+  update public.padron_accesos_importados
+  set codigo_acceso = next_code,
+      codigo_acceso_expires_at = next_expiration,
+      updated_at = timezone('utc', now())
+  where id = roster_row.id;
+
+  return query
+  select roster_row.id, next_code, next_expiration;
 end;
 $$;
 
@@ -1311,98 +1396,6 @@ begin
     dni = nullif(trim(coalesce(p_dni, '')), ''),
     updated_at = timezone('utc', now())
   where id = current_user_id;
-
-  insert into public.consorcio_channel_integrations (consorcio_id, canal, proveedor, remitente, credenciales, modo_prueba, activo, updated_by)
-  values
-    (created_consorcio_id, 'email', 'smtp', null, '{}'::jsonb, true, false, current_user_id),
-    (created_consorcio_id, 'whatsapp', 'meta', null, '{}'::jsonb, true, false, current_user_id)
-  on conflict on constraint consorcio_channel_integrations_consorcio_id_canal_key do nothing;
-
-  return query
-  select current_user_id, created_consorcio_id, generated_code;
-end;
-$$;
-
-create or replace function public.complete_demo_onboarding(
-  p_nombre text,
-  p_apellido text,
-  p_telefono text,
-  p_dni text,
-  p_consorcio_nombre text,
-  p_consorcio_direccion text default 'Modo demo Comunitaria',
-  p_cuit text default null
-)
-returns table(profile_id uuid, consorcio_id uuid, codigo_invitacion text)
-language plpgsql
-security definer
-set search_path = public
-as $$
-declare
-  current_user_id uuid := auth.uid();
-  generated_code text;
-  created_consorcio_id uuid;
-begin
-  if current_user_id is null then
-    raise exception 'Usuario no autenticado';
-  end if;
-
-  perform public.ensure_profile_for_auth_user(current_user_id, null, p_nombre, p_apellido, p_telefono, p_dni);
-
-  if coalesce(trim(p_consorcio_nombre), '') = '' then
-    raise exception 'El nombre del espacio demo es obligatorio';
-  end if;
-
-  generated_code := public.generate_invitation_code(concat(trim(p_consorcio_nombre), '-demo'));
-
-  insert into public.consorcios (
-    nombre,
-    direccion,
-    cuit,
-    codigo_invitacion,
-    es_demo,
-    demo_unit_limit,
-    cantidad_unidades
-  )
-  values (
-    trim(p_consorcio_nombre),
-    trim(coalesce(nullif(p_consorcio_direccion, ''), 'Modo demo Comunitaria')),
-    nullif(trim(coalesce(p_cuit, '')), ''),
-    generated_code,
-    true,
-    3,
-    0
-  )
-  returning id into created_consorcio_id;
-
-  update public.profiles
-  set
-    consorcio_id = created_consorcio_id,
-    rol = 'admin',
-    estado = 'activo',
-    nombre = trim(coalesce(p_nombre, '')),
-    apellido = trim(coalesce(p_apellido, '')),
-    telefono = nullif(trim(coalesce(p_telefono, '')), ''),
-    dni = nullif(trim(coalesce(p_dni, '')), ''),
-    updated_at = timezone('utc', now())
-  where id = current_user_id;
-
-  insert into public.consorcio_suscripciones (
-    consorcio_id,
-    admin_id,
-    plan,
-    estado,
-    monto_mensual,
-    observaciones
-  )
-  values (
-    created_consorcio_id,
-    current_user_id,
-    'base',
-    'trial',
-    0,
-    'Tenant demo autogestionado con limite de 3 unidades funcionales.'
-  )
-  on conflict on constraint consorcio_suscripciones_consorcio_id_key do nothing;
 
   insert into public.consorcio_channel_integrations (consorcio_id, canal, proveedor, remitente, credenciales, modo_prueba, activo, updated_by)
   values
@@ -1481,7 +1474,7 @@ begin
 end;
 $$;
 
-create or replace function public.enforce_demo_unit_limit()
+create or replace function public.enforce_trial_unit_limit()
 returns trigger
 language plpgsql
 set search_path = public
@@ -1557,6 +1550,47 @@ begin
 
   if next_count + 1 > greatest(coalesce(tenant_record.trial_guard_post_limit, 1), 0) then
     raise exception 'El periodo de prueba permite cargar hasta % puesto de vigilancia', greatest(coalesce(tenant_record.trial_guard_post_limit, 1), 0);
+  end if;
+
+  return new;
+end;
+$$;
+
+create or replace function public.log_platform_audit_event()
+returns trigger
+language plpgsql
+set search_path = public
+as $$
+declare
+  actor_id_value uuid := auth.uid();
+  next_row jsonb := case when tg_op in ('INSERT', 'UPDATE') then to_jsonb(new) else '{}'::jsonb end;
+  previous_row jsonb := case when tg_op in ('UPDATE', 'DELETE') then to_jsonb(old) else '{}'::jsonb end;
+  consorcio_id_value text := coalesce(next_row ->> 'consorcio_id', previous_row ->> 'consorcio_id');
+  target_id_value text := coalesce(next_row ->> 'id', previous_row ->> 'id');
+begin
+  insert into public.platform_audit_events (
+    actor_id,
+    action,
+    target_table,
+    target_id,
+    consorcio_id,
+    detail
+  )
+  values (
+    actor_id_value,
+    lower(tg_table_name || '_' || tg_op),
+    tg_table_name,
+    nullif(target_id_value, ''),
+    nullif(consorcio_id_value, '')::uuid,
+    jsonb_build_object(
+      'operation', lower(tg_op),
+      'new', next_row,
+      'old', previous_row
+    )
+  );
+
+  if tg_op = 'DELETE' then
+    return old;
   end if;
 
   return new;
@@ -3034,6 +3068,140 @@ begin
 end;
 $$;
 
+create or replace function public.register_provider_entry(
+  p_proveedor_id uuid,
+  p_note text default null,
+  p_punto_vigilancia_id uuid default null
+)
+returns table(provider_id uuid, provider_name text, entry_id uuid)
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  current_user_id uuid := auth.uid();
+  access_role public.app_role := public.current_role();
+  provider_record public.proveedores%rowtype;
+  selected_point_id uuid;
+  missing_required_documents text[];
+  expired_required_documents text[];
+  created_entry_id uuid;
+begin
+  if current_user_id is null then
+    raise exception 'Usuario no autenticado';
+  end if;
+
+  if not public.is_superadmin() and access_role not in ('admin', 'seguridad') then
+    raise exception 'No tienes permisos para registrar ingresos de proveedores';
+  end if;
+
+  select *
+  into provider_record
+  from public.proveedores
+  where id = p_proveedor_id
+    and activo = true
+    and (
+      public.is_superadmin()
+      or consorcio_id = public.current_consorcio_id()
+    )
+  limit 1;
+
+  if provider_record.id is null then
+    raise exception 'No se encontro un proveedor activo para registrar';
+  end if;
+
+  if p_punto_vigilancia_id is not null then
+    select id
+    into selected_point_id
+    from public.puntos_vigilancia
+    where id = p_punto_vigilancia_id
+      and consorcio_id = provider_record.consorcio_id
+      and activo = true
+    limit 1;
+
+    if selected_point_id is null then
+      raise exception 'El punto de vigilancia indicado no esta disponible para este consorcio';
+    end if;
+  end if;
+
+  select array_agg(req.nombre order by req.nombre)
+  into missing_required_documents
+  from public.proveedor_documento_requisitos req
+  left join lateral (
+    select doc.vence_el
+    from public.proveedor_documentos doc
+    where doc.consorcio_id = provider_record.consorcio_id
+      and doc.proveedor_id = provider_record.id
+      and (
+        doc.requisito_id = req.id
+        or doc.tipo::text = req.codigo
+      )
+    order by doc.vence_el desc
+    limit 1
+  ) latest_doc on true
+  where req.consorcio_id = provider_record.consorcio_id
+    and req.requerido = true
+    and latest_doc.vence_el is null;
+
+  if coalesce(array_length(missing_required_documents, 1), 0) > 0 then
+    raise exception 'Ingreso bloqueado. Faltan documentos obligatorios: %', array_to_string(missing_required_documents, ', ');
+  end if;
+
+  select array_agg(req.nombre order by req.nombre)
+  into expired_required_documents
+  from public.proveedor_documento_requisitos req
+  join lateral (
+    select doc.vence_el
+    from public.proveedor_documentos doc
+    where doc.consorcio_id = provider_record.consorcio_id
+      and doc.proveedor_id = provider_record.id
+      and (
+        doc.requisito_id = req.id
+        or doc.tipo::text = req.codigo
+      )
+    order by doc.vence_el desc
+    limit 1
+  ) latest_doc on true
+  where req.consorcio_id = provider_record.consorcio_id
+    and req.requerido = true
+    and latest_doc.vence_el < current_date;
+
+  if coalesce(array_length(expired_required_documents, 1), 0) > 0 then
+    raise exception 'Ingreso bloqueado. Documentacion vencida: %', array_to_string(expired_required_documents, ', ');
+  end if;
+
+  insert into public.ingresos_guardia (
+    consorcio_id,
+    proveedor_id,
+    guardia_id,
+    punto_vigilancia_id,
+    descripcion
+  )
+  values (
+    provider_record.consorcio_id,
+    provider_record.id,
+    current_user_id,
+    selected_point_id,
+    concat(
+      'Ingreso proveedor: ',
+      provider_record.nombre,
+      case
+        when provider_record.empresa is not null and trim(provider_record.empresa) <> '' then concat(' · ', trim(provider_record.empresa))
+        else ''
+      end,
+      case
+        when p_note is not null and trim(p_note) <> '' then concat(' · ', trim(p_note))
+        else ''
+      end
+    )
+  )
+  returning id into created_entry_id;
+
+  return query
+  select provider_record.id, provider_record.nombre, created_entry_id;
+end;
+$$;
+
 drop trigger if exists on_auth_user_created on auth.users;
 create trigger on_auth_user_created
 after insert on auth.users
@@ -3059,10 +3227,30 @@ create trigger consorcio_channel_integrations_touch_updated_at
 before update on public.consorcio_channel_integrations
 for each row execute function public.touch_updated_at();
 
-drop trigger if exists enforce_demo_unit_limit_trigger on public.unidades_funcionales;
-create trigger enforce_demo_unit_limit_trigger
+drop trigger if exists platform_settings_audit_trigger on public.platform_settings;
+create trigger platform_settings_audit_trigger
+after update on public.platform_settings
+for each row execute function public.log_platform_audit_event();
+
+drop trigger if exists consorcios_audit_trigger on public.consorcios;
+create trigger consorcios_audit_trigger
+after update on public.consorcios
+for each row execute function public.log_platform_audit_event();
+
+drop trigger if exists consorcio_suscripciones_audit_trigger on public.consorcio_suscripciones;
+create trigger consorcio_suscripciones_audit_trigger
+after insert or update on public.consorcio_suscripciones
+for each row execute function public.log_platform_audit_event();
+
+drop trigger if exists admin_payment_events_audit_trigger on public.admin_payment_events;
+create trigger admin_payment_events_audit_trigger
+after insert or update on public.admin_payment_events
+for each row execute function public.log_platform_audit_event();
+
+drop trigger if exists enforce_trial_unit_limit_trigger on public.unidades_funcionales;
+create trigger enforce_trial_unit_limit_trigger
 before insert or update on public.unidades_funcionales
-for each row execute function public.enforce_demo_unit_limit();
+for each row execute function public.enforce_trial_unit_limit();
 
 drop trigger if exists padron_accesos_importados_codigo_trigger on public.padron_accesos_importados;
 create trigger padron_accesos_importados_codigo_trigger
@@ -3126,6 +3314,59 @@ begin
   returning id into created_notification_id;
 
   return created_notification_id;
+end;
+$$;
+
+create or replace function public.mark_visible_notifications_read(
+  p_notification_ids uuid[] default null
+)
+returns integer
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  current_user_id uuid := auth.uid();
+  marked_count integer := 0;
+begin
+  if current_user_id is null then
+    raise exception 'Usuario no autenticado';
+  end if;
+
+  with visible_notifications as (
+    select notification.id
+    from public.notificaciones notification
+    where (
+      public.is_superadmin()
+      or notification.destinatario_id = current_user_id
+      or (
+        notification.consorcio_id = public.current_consorcio_id()
+        and notification.rol_destino = public.current_role()
+      )
+      or (
+        notification.consorcio_id = public.current_consorcio_id()
+        and public.current_role() = 'admin'
+      )
+    )
+    and (p_notification_ids is null or notification.id = any(p_notification_ids))
+  ),
+  upsert_reads as (
+    insert into public.notificacion_lecturas (notificacion_id, profile_id, leida_at)
+    select visible_notifications.id, current_user_id, timezone('utc', now())
+    from visible_notifications
+    on conflict (notificacion_id, profile_id)
+    do update set leida_at = excluded.leida_at
+    returning notificacion_id
+  )
+  select count(*) into marked_count
+  from upsert_reads;
+
+  update public.notificaciones notification
+  set leida_at = timezone('utc', now())
+  where notification.destinatario_id = current_user_id
+    and (p_notification_ids is null or notification.id = any(p_notification_ids));
+
+  return marked_count;
 end;
 $$;
 
@@ -3771,9 +4012,9 @@ grant execute on function public.is_superadmin() to authenticated;
 grant execute on function public.current_profile_is_active() to authenticated;
 grant execute on function public.complete_admin_registration(text, text, text, text, text, text, text, text, text) to authenticated;
 grant execute on function public.activate_access_with_code(text, public.app_role, text, text, text, text, text) to authenticated;
+grant execute on function public.refresh_roster_access_code(uuid) to authenticated;
 
 grant execute on function public.complete_admin_onboarding(text, text, text, text, text, text, text) to authenticated;
-grant execute on function public.complete_demo_onboarding(text, text, text, text, text, text, text) to authenticated;
 grant execute on function public.request_admin_access(text, text, text, text, text) to authenticated;
 grant execute on function public.request_resident_access(text, text, text, text, text, text) to authenticated;
 grant execute on function public.review_profile_request(uuid, public.profile_status, public.app_role) to authenticated;
@@ -3792,7 +4033,9 @@ grant execute on function public.create_visit_authorization(text, text, date, ti
 grant execute on function public.list_pending_dependent_visits() to authenticated;
 grant execute on function public.review_dependent_visit_authorization(uuid, text) to authenticated;
 grant execute on function public.validate_visit_entry(text, text, uuid) to authenticated;
+grant execute on function public.register_provider_entry(uuid, text, uuid) to authenticated;
 grant execute on function public.create_notification(uuid, text, text, text, public.app_role, uuid, jsonb) to authenticated;
+grant execute on function public.mark_visible_notifications_read(uuid[]) to authenticated;
 grant execute on function public.upsert_channel_integration(public.notification_delivery_channel, text, text, jsonb, boolean, boolean) to authenticated;
 grant execute on function public.upsert_subscription_charge_config(numeric, public.subscription_charge_mode, numeric, public.subscription_charge_target, text) to authenticated;
 grant execute on function public.enqueue_notification_whatsapp(uuid, uuid, text, text, text, uuid, jsonb) to authenticated;
@@ -3812,8 +4055,10 @@ alter table public.platform_superusers enable row level security;
 alter table public.consorcio_channel_integrations enable row level security;
 alter table public.cargos_plataforma_unidad enable row level security;
 alter table public.admin_payment_events enable row level security;
+alter table public.platform_audit_events enable row level security;
 alter table public.padron_accesos_importados enable row level security;
 alter table public.notificaciones enable row level security;
+alter table public.notificacion_lecturas enable row level security;
 alter table public.notificacion_salidas enable row level security;
 alter table public.chat_topics enable row level security;
 alter table public.chat_mensajes enable row level security;
@@ -4007,6 +4252,20 @@ for all
 using (public.is_superadmin())
 with check (public.is_superadmin());
 
+create policy "platform_audit_superadmin_read"
+on public.platform_audit_events
+for select
+using (public.is_superadmin());
+
+create policy "platform_audit_actor_insert"
+on public.platform_audit_events
+for insert
+with check (
+  public.is_superadmin()
+  or public.current_role() = 'admin'
+  or actor_id is null
+);
+
 create policy "platform_superusers_superadmin_only"
 on public.platform_superusers
 for all
@@ -4047,6 +4306,43 @@ with check (
     consorcio_id = public.current_consorcio_id()
     and public.current_role() = 'admin'
   )
+);
+
+create policy "tenant_notification_reads_select"
+on public.notificacion_lecturas
+for select
+using (
+  public.is_superadmin()
+  or profile_id = auth.uid()
+  or (
+    public.current_role() = 'admin'
+    and exists (
+      select 1
+      from public.notificaciones notification
+      where notification.id = public.notificacion_lecturas.notificacion_id
+        and notification.consorcio_id = public.current_consorcio_id()
+    )
+  )
+);
+
+create policy "tenant_notification_reads_insert"
+on public.notificacion_lecturas
+for insert
+with check (
+  public.is_superadmin()
+  or profile_id = auth.uid()
+);
+
+create policy "tenant_notification_reads_update"
+on public.notificacion_lecturas
+for update
+using (
+  public.is_superadmin()
+  or profile_id = auth.uid()
+)
+with check (
+  public.is_superadmin()
+  or profile_id = auth.uid()
 );
 
 create policy "tenant_notification_deliveries_select"

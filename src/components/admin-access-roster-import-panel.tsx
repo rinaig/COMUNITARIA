@@ -29,7 +29,8 @@ type ExistingAccessRow = AccessRosterRow & {
   rol_objetivo: AccessRole;
   codigo_acceso: string | null;
   codigo_acceso_expires_at: string | null;
-  estado_reclamo: "no_reclamado" | "pendiente" | "activo";
+  is_codigo_expirado: boolean;
+  estado_reclamo: "no_reclamado" | "pendiente" | "activo" | "rechazado";
 };
 
 const ACCESS_HEADERS = ["nombre", "apellido", "email", "telefono", "dni", "unidad_funcional", "puesto_vigilancia"];
@@ -147,6 +148,7 @@ export function AdminAccessRosterImportPanel() {
   const [loading, setLoading] = useState(() => configured);
   const [importing, setImporting] = useState(false);
   const [exporting, setExporting] = useState(false);
+  const [refreshingInviteId, setRefreshingInviteId] = useState<string | null>(null);
   const [roleMode, setRoleMode] = useState<AccessRole>("residente");
   const [fileName, setFileName] = useState("");
   const [parsedRows, setParsedRows] = useState<ParsedAccessRow[]>([]);
@@ -204,11 +206,16 @@ export function AdminAccessRosterImportPanel() {
       ((claimedProfiles as Array<{ email: string; estado: "pendiente" | "activo" | "rechazado" }> | null) ?? []).map((row) => [row.email.toLowerCase(), row.estado]),
     );
 
+    const currentTime = Date.now();
+
     setExistingRows(
       rosterRows.map((row) => ({
         ...row,
+        is_codigo_expirado: row.codigo_acceso_expires_at ? new Date(row.codigo_acceso_expires_at).getTime() < currentTime : false,
         estado_reclamo: claimStateByEmail.get(row.email.toLowerCase()) === "activo"
           ? "activo"
+          : claimStateByEmail.get(row.email.toLowerCase()) === "rechazado"
+            ? "rechazado"
           : claimStateByEmail.get(row.email.toLowerCase()) === "pendiente"
             ? "pendiente"
             : "no_reclamado",
@@ -414,9 +421,37 @@ export function AdminAccessRosterImportPanel() {
     await handleCopyInvite(row);
   }
 
+  async function handleRefreshInvite(row: ExistingAccessRow) {
+    if (!supabase || !session?.user) {
+      return;
+    }
+
+    setRefreshingInviteId(row.id);
+    setError("");
+    setMessage("");
+
+    const { error: refreshError } = await supabase.rpc("refresh_roster_access_code", {
+      p_roster_id: row.id,
+    });
+
+    if (refreshError) {
+      setError(refreshError.message);
+      setRefreshingInviteId(null);
+      return;
+    }
+
+    setMessage(`Codigo regenerado para ${row.email}.`);
+    await loadRoster(roleMode, session.user.id);
+    setRefreshingInviteId(null);
+  }
+
   function getClaimStatusLabel(status: ExistingAccessRow["estado_reclamo"]) {
     if (status === "activo") {
       return "activo";
+    }
+
+    if (status === "rechazado") {
+      return "rechazado";
     }
 
     if (status === "pendiente") {
@@ -431,6 +466,10 @@ export function AdminAccessRosterImportPanel() {
       return "status-badge status-badge--success";
     }
 
+    if (status === "rechazado") {
+      return "rounded-full bg-rose-100 px-3 py-2 text-xs font-extrabold uppercase tracking-[0.18em] text-rose-700";
+    }
+
     if (status === "pendiente") {
       return "status-badge status-badge--warning";
     }
@@ -443,7 +482,7 @@ export function AdminAccessRosterImportPanel() {
       accumulator[row.estado_reclamo] += 1;
       return accumulator;
     },
-    { no_reclamado: 0, pendiente: 0, activo: 0 },
+    { no_reclamado: 0, pendiente: 0, activo: 0, rechazado: 0 },
   );
 
   if (!configured || !session?.user) {
@@ -470,10 +509,11 @@ export function AdminAccessRosterImportPanel() {
         <button className="button-secondary" disabled={exporting} onClick={() => void handleExport()} type="button">{exporting ? "Exportando..." : "Exportar CSV actual"}</button>
       </div>
 
-      <div className="mt-6 grid gap-4 md:grid-cols-3">
+      <div className="mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         <article className="metric-card"><p className="text-sm uppercase tracking-[0.18em] text-slate-500">No reclamado</p><p className="mt-3 text-3xl font-semibold text-slate-950">{statusSummary.no_reclamado}</p></article>
         <article className="metric-card"><p className="text-sm uppercase tracking-[0.18em] text-slate-500">Pendiente</p><p className="mt-3 text-3xl font-semibold text-slate-950">{statusSummary.pendiente}</p></article>
         <article className="metric-card"><p className="text-sm uppercase tracking-[0.18em] text-slate-500">Activo</p><p className="mt-3 text-3xl font-semibold text-slate-950">{statusSummary.activo}</p></article>
+        <article className="metric-card"><p className="text-sm uppercase tracking-[0.18em] text-slate-500">Rechazado</p><p className="mt-3 text-3xl font-semibold text-slate-950">{statusSummary.rechazado}</p></article>
       </div>
 
       <div className="mt-6 grid gap-6 lg:grid-cols-[0.9fr_1.1fr]">
@@ -505,7 +545,11 @@ export function AdminAccessRosterImportPanel() {
         <article className="role-card">
           <p className="text-sm uppercase tracking-[0.2em] text-slate-500">Padron importado</p>
           <div className="mt-4 grid gap-3">
-            {loading ? <p className="text-sm leading-7 text-slate-600">Cargando padron.</p> : existingRows.length === 0 ? <p className="text-sm leading-7 text-slate-600">Todavia no hay registros importados para este rol.</p> : existingRows.map((row) => <div className="rounded-2xl border border-slate-200 bg-white/80 p-4" key={row.id}><div className="flex items-start justify-between gap-3"><div><h4 className="text-lg font-semibold text-slate-950">{row.nombre} {row.apellido}</h4><p className="mt-1 text-sm leading-7 text-slate-600">{row.email}</p></div><div className="flex flex-wrap items-center justify-end gap-2"><span className="status-badge status-badge--neutral">{row.rol_objetivo}</span>{row.es_menor ? <span className="status-badge status-badge--warning">menor</span> : null}<span className={getClaimStatusClass(row.estado_reclamo)}>{getClaimStatusLabel(row.estado_reclamo)}</span></div></div><div className="mt-3 flex flex-wrap gap-3 text-xs uppercase tracking-[0.18em] text-slate-400"><span>{row.telefono ?? "sin telefono"}</span><span>{row.dni ?? "sin dni"}</span><span>{row.unidad_funcional ?? row.puesto_vigilancia ?? "sin referencia"}</span>{row.codigo_acceso ? <span>codigo {row.codigo_acceso}</span> : null}{row.adulto_responsable_email ? <span>adulto {row.adulto_responsable_email}</span> : null}</div><div className="mt-4 text-sm leading-7 text-slate-600">{row.codigo_acceso_expires_at ? `Vence ${new Date(row.codigo_acceso_expires_at).toLocaleString()}` : "Sin vencimiento informado"}</div><div className="mt-4 flex flex-wrap gap-3"><button className="button-secondary" onClick={() => void handleCopyInvite(row)} type="button">Copiar invitacion</button><button className="button-secondary" onClick={() => void handleShareInvite(row)} type="button">Compartir</button><a className="button-secondary" href={`mailto:${encodeURIComponent(row.email)}?subject=${encodeURIComponent("Invitacion Comunitaria")}&body=${encodeURIComponent(`Hola ${row.nombre}, este es tu enlace para completar el alta en Comunitaria: ${buildInviteUrl(row)}`)}`}>Email</a></div></div>)}
+            {loading ? <p className="text-sm leading-7 text-slate-600">Cargando padron.</p> : existingRows.length === 0 ? <p className="text-sm leading-7 text-slate-600">Todavia no hay registros importados para este rol.</p> : existingRows.map((row) => {
+              const inviteBusy = refreshingInviteId === row.id;
+
+              return <div className="rounded-2xl border border-slate-200 bg-white/80 p-4" key={row.id}><div className="flex items-start justify-between gap-3"><div><h4 className="text-lg font-semibold text-slate-950">{row.nombre} {row.apellido}</h4><p className="mt-1 text-sm leading-7 text-slate-600">{row.email}</p></div><div className="flex flex-wrap items-center justify-end gap-2"><span className="status-badge status-badge--neutral">{row.rol_objetivo}</span>{row.es_menor ? <span className="status-badge status-badge--warning">menor</span> : null}<span className={getClaimStatusClass(row.estado_reclamo)}>{getClaimStatusLabel(row.estado_reclamo)}</span>{row.is_codigo_expirado ? <span className="status-badge status-badge--warning">codigo vencido</span> : null}</div></div><div className="mt-3 flex flex-wrap gap-3 text-xs uppercase tracking-[0.18em] text-slate-400"><span>{row.telefono ?? "sin telefono"}</span><span>{row.dni ?? "sin dni"}</span><span>{row.unidad_funcional ?? row.puesto_vigilancia ?? "sin referencia"}</span>{row.codigo_acceso ? <span>codigo {row.codigo_acceso}</span> : null}{row.adulto_responsable_email ? <span>adulto {row.adulto_responsable_email}</span> : null}</div><div className="mt-4 text-sm leading-7 text-slate-600">{row.codigo_acceso_expires_at ? `Vence ${new Date(row.codigo_acceso_expires_at).toLocaleString()}` : "Sin vencimiento informado"}</div>{row.estado_reclamo === "rechazado" ? <p className="mt-3 text-sm leading-7 text-rose-700">La invitacion ya fue reclamada pero el acceso del perfil quedo rechazado. Puedes regenerar el codigo para relanzar el alta cuando corresponda.</p> : null}<div className="mt-4 flex flex-wrap gap-3"><button className="button-secondary" onClick={() => void handleCopyInvite(row)} type="button">Copiar invitacion</button><button className="button-secondary" disabled={inviteBusy} onClick={() => void handleShareInvite(row)} type="button">Compartir</button><button className="button-secondary" disabled={inviteBusy} onClick={() => void handleRefreshInvite(row)} type="button">{inviteBusy ? "Regenerando..." : row.estado_reclamo === "rechazado" ? "Reemitir invitacion" : "Regenerar codigo"}</button><a className="button-secondary" href={`mailto:${encodeURIComponent(row.email)}?subject=${encodeURIComponent("Invitacion Comunitaria")}&body=${encodeURIComponent(`Hola ${row.nombre}, este es tu enlace para completar el alta en Comunitaria: ${buildInviteUrl(row)}`)}`}>Email</a></div></div>;
+            })}
           </div>
         </article>
       </div>

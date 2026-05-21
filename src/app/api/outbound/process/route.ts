@@ -1,6 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { processOutboundQueue } from "@/lib/outbound-processor";
-import { createServerSupabaseAdminClient, createServerSupabaseAuthClient } from "@/lib/supabase-server";
+import {
+  createServerSupabaseAdminClient,
+  createServerSupabaseAuthClient,
+  getMissingServerSupabaseEnvNames,
+  getServerSupabaseEnvIssueMessage,
+} from "@/lib/supabase-server";
 
 type ProfileAuthRow = {
   rol: "superadmin" | "admin" | "residente" | "seguridad";
@@ -18,6 +23,13 @@ function extractBearerToken(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
+    if (getMissingServerSupabaseEnvNames().length > 0) {
+      return NextResponse.json(
+        { error: getServerSupabaseEnvIssueMessage("procesar la cola saliente") },
+        { status: 503 },
+      );
+    }
+
     const accessToken = extractBearerToken(request);
     if (!accessToken) {
       return NextResponse.json({ error: "Falta token de sesion." }, { status: 401 });

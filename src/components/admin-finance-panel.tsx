@@ -160,6 +160,7 @@ export function AdminFinancePanel() {
           <label><span className="field-label">Monto</span><input className="field mt-2" min="0" onChange={(event) => setAmount(event.target.value)} required step="0.01" type="number" value={amount} /></label>
           <label><span className="field-label">Fecha del gasto</span><input className="field mt-2" onChange={(event) => setExpenseDate(event.target.value)} required type="date" value={expenseDate} /></label>
           <label><span className="field-label">Comprobante</span><input className="field mt-2" accept=".pdf,image/*" onChange={(event) => setReceiptFile(event.target.files?.[0] ?? null)} required type="file" /></label>
+          <p className="text-sm leading-7 text-slate-600">Si adjuntas una imagen, se convierte a WebP con ancho maximo de 1200 px y limite final de 3 MB. Los PDF no se convierten.</p>
           <button className="button-primary" disabled={saving || loading} type="submit">{saving ? "Guardando..." : "Cargar gasto"}</button>
         </form>
 

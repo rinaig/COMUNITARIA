@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
 import type { Session } from "@supabase/supabase-js";
 import { DOCUMENT_BUCKET, getCurrentConsorcioId, uploadTenantFile } from "@/lib/storage";
+import { getCompatIssueMessage, loadPlatformSettingsCompat } from "@/lib/platform-schema-compat";
 import { getSupabaseBrowserClient, isSupabaseConfigured } from "@/lib/supabase";
 
 type ChargeMode = "admin_absorbe" | "monto_fijo_por_unidad" | "porcentaje_por_unidad";
@@ -103,6 +104,7 @@ export function AdminSubscriptionPricingPanel() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
+  const [billingWarning, setBillingWarning] = useState("");
   const [consorcio, setConsorcio] = useState<ConsorcioSummary | null>(null);
   const [subscription, setSubscription] = useState<SubscriptionPricingRow | null>(null);
   const [platformDefaultUnitPrice, setPlatformDefaultUnitPrice] = useState("0");
@@ -136,26 +138,74 @@ export function AdminSubscriptionPricingPanel() {
 
     setLoading(true);
     setError("");
+    setBillingWarning("");
 
     const consorcioId = await getCurrentConsorcioId(supabase, userId);
-    const [consorcioResult, settingsResult, subscriptionResult, transferEventsResult, chargesResult] = await Promise.all([
-      supabase.from("consorcios").select("id, nombre, cantidad_unidades").eq("id", consorcioId).maybeSingle(),
-      supabase.from("platform_settings").select("default_unit_price").eq("id", true).maybeSingle(),
+    const consorcioResult = await supabase.from("consorcios").select("id, nombre, cantidad_unidades").eq("id", consorcioId).maybeSingle();
+    if (consorcioResult.error) {
+      setError(consorcioResult.error.message);
+      setLoading(false);
+      return;
+    }
+
+    const settingsCompat = await loadPlatformSettingsCompat(supabase);
+    if (settingsCompat.error) {
+      setError(settingsCompat.error);
+      setLoading(false);
+      return;
+    }
+
+    const [subscriptionResult, transferEventsResult, chargesResult] = await Promise.allSettled([
       supabase.from("consorcio_suscripciones").select("id, consorcio_id, monto_mensual, precio_lista_por_unidad, unit_price_override, modalidad_cobro, valor_cobro, destino_cobro, observaciones").eq("consorcio_id", consorcioId).maybeSingle(),
       supabase.from("admin_payment_events").select("id, importe, estado, fecha_pago, referencia, nota, created_at").eq("consorcio_id", consorcioId).order("created_at", { ascending: false }).limit(6),
       supabase.from("cargos_plataforma_unidad").select("id, periodo_referencia, destino_cobro, monto, estado, fecha_vencimiento, enlace_pago, referencia_pago, comprobante_url, detalle, unidades_funcionales(codigo)").order("created_at", { ascending: false }).limit(8),
     ]);
 
-    const firstError = consorcioResult.error ?? settingsResult.error ?? subscriptionResult.error ?? transferEventsResult.error ?? chargesResult.error;
-    if (firstError) {
-      setError(firstError.message);
-      setLoading(false);
-      return;
+    const nextConsorcio = (consorcioResult.data as ConsorcioSummary | null) ?? null;
+    let nextSubscription: SubscriptionPricingRow | null = null;
+    let nextTransferEvents: PaymentEventRow[] = [];
+    let nextCharges: UnitChargeRow[] = [];
+    const warnings: string[] = [];
+
+    if (settingsCompat.warning) {
+      warnings.push(settingsCompat.warning);
     }
 
-    const nextConsorcio = (consorcioResult.data as ConsorcioSummary | null) ?? null;
-    const nextSubscription = (subscriptionResult.data as SubscriptionPricingRow | null) ?? null;
-    const defaultUnitPrice = Number((settingsResult.data as { default_unit_price: number } | null)?.default_unit_price ?? 0);
+    if (subscriptionResult.status === "fulfilled") {
+      if (subscriptionResult.value.error) {
+        warnings.push(getCompatIssueMessage("Suscripcion", subscriptionResult.value.error));
+      } else {
+        nextSubscription = (subscriptionResult.value.data as SubscriptionPricingRow | null) ?? null;
+      }
+    } else {
+      warnings.push(getCompatIssueMessage("Suscripcion", subscriptionResult.reason));
+    }
+
+    if (transferEventsResult.status === "fulfilled") {
+      if (transferEventsResult.value.error) {
+        warnings.push(getCompatIssueMessage("Transferencias", transferEventsResult.value.error));
+      } else {
+        nextTransferEvents = (transferEventsResult.value.data as PaymentEventRow[] | null) ?? [];
+      }
+    } else {
+      warnings.push(getCompatIssueMessage("Transferencias", transferEventsResult.reason));
+    }
+
+    if (chargesResult.status === "fulfilled") {
+      if (chargesResult.value.error) {
+        warnings.push(getCompatIssueMessage("Cargos por unidad", chargesResult.value.error));
+      } else {
+        nextCharges = (chargesResult.value.data as UnitChargeRow[] | null) ?? [];
+      }
+    } else {
+      warnings.push(getCompatIssueMessage("Cargos por unidad", chargesResult.reason));
+    }
+
+    if (warnings.length > 0) {
+      setBillingWarning(warnings.join(" "));
+    }
+
+    const defaultUnitPrice = Number(settingsCompat.data.default_unit_price ?? 0);
 
     setConsorcio(nextConsorcio);
     setSubscription(nextSubscription);
@@ -165,8 +215,7 @@ export function AdminSubscriptionPricingPanel() {
     setChargeValue(String(nextSubscription?.valor_cobro ?? 0));
     setChargeTarget(nextSubscription?.destino_cobro ?? "propietario");
     setNotes(nextSubscription?.observaciones ?? "");
-    setTransferEvents((transferEventsResult.data as PaymentEventRow[] | null) ?? []);
-    const nextCharges = (chargesResult.data as UnitChargeRow[] | null) ?? [];
+    setTransferEvents(nextTransferEvents);
     setCharges(nextCharges);
     setChargeLinks(Object.fromEntries(nextCharges.map((item) => [item.id, item.enlace_pago ?? ""])));
     setChargeDetails(Object.fromEntries(nextCharges.map((item) => [item.id, item.detalle ?? ""])));
@@ -415,6 +464,7 @@ export function AdminSubscriptionPricingPanel() {
       </div>
 
       {error ? <article className="role-card mt-6 border-amber-200 bg-amber-50/80"><p className="text-sm font-semibold text-amber-700">Error</p><p className="mt-2 text-sm leading-7 text-amber-700">{error}</p></article> : null}
+  {billingWarning ? <article className="role-card mt-6 border-slate-200 bg-slate-50/80"><p className="text-sm font-semibold text-slate-700">Facturacion comercial</p><p className="mt-2 text-sm leading-7 text-slate-600">{billingWarning}</p></article> : null}
       {message ? <article className="role-card mt-6 border-emerald-200 bg-emerald-50/80"><p className="text-sm font-semibold text-emerald-700">Estado</p><p className="mt-2 text-sm leading-7 text-emerald-700">{message}</p></article> : null}
 
       <div className="mt-6 grid gap-6 lg:grid-cols-[0.92fr_1.08fr]">
@@ -494,7 +544,7 @@ export function AdminSubscriptionPricingPanel() {
             {charges.length === 0 ? <p className="text-sm leading-7 text-slate-600">Todavia no hay cargos generados.</p> : charges.map((item) => {
               const unit = normalizeUnitRelation(item.unidades_funcionales);
               const isPaid = item.estado === "pagado";
-              return <div className="rounded-2xl border border-slate-200 bg-white/80 p-4" key={item.id}><div className="flex items-start justify-between gap-3"><div><h4 className="text-lg font-semibold text-slate-950">Unidad {unit?.codigo ?? "sin codigo"}</h4><p className="mt-1 text-sm leading-7 text-slate-600">Periodo {item.periodo_referencia} · $ {Number(item.monto).toLocaleString("es-AR")}</p></div><span className="status-badge status-badge--neutral">{item.estado}</span></div><div className="mt-3 grid gap-3 md:grid-cols-2"><label><span className="field-label">Vencimiento</span><input className="field mt-2" onChange={(event) => setChargeDueDates((current) => ({ ...current, [item.id]: event.target.value }))} type="date" value={chargeDueDates[item.id] ?? ""} /></label><label><span className="field-label">Enlace o instruccion</span><input className="field mt-2" onChange={(event) => setChargeLinks((current) => ({ ...current, [item.id]: event.target.value }))} placeholder="https://..., alias o CBU" value={chargeLinks[item.id] ?? ""} /></label></div><label className="mt-3 block"><span className="field-label">Detalle</span><textarea className="field-textarea mt-2" onChange={(event) => setChargeDetails((current) => ({ ...current, [item.id]: event.target.value }))} rows={3} value={chargeDetails[item.id] ?? ""} /></label><div className="mt-3 flex flex-wrap gap-3">{chargeLinks[item.id] ? isExternalUrl(chargeLinks[item.id]) ? <a className="button-secondary" href={chargeLinks[item.id]} rel="noreferrer" target="_blank">Abrir enlace</a> : <span className="rounded-full bg-slate-100 px-3 py-2 text-xs uppercase tracking-[0.18em] text-slate-500">Instruccion manual cargada</span> : null}<button className="button-secondary" disabled={savingChargeId === item.id} onClick={() => void handleSaveChargeCollection(item.id)} type="button">{savingChargeId === item.id ? "Guardando..." : "Guardar cobranza"}</button></div>{isPaid ? <div className="mt-3 text-sm leading-7 text-emerald-700">Pago registrado {item.referencia_pago ? `· Ref. ${item.referencia_pago}` : ""}{item.comprobante_url ? <div className="mt-2"><a className="button-secondary" href={item.comprobante_url} rel="noreferrer" target="_blank">Ver comprobante</a></div> : null}</div> : <div className="mt-3 grid gap-3 md:grid-cols-[1fr_1fr_auto]"><input className="field" onChange={(event) => setPaymentReferences((current) => ({ ...current, [item.id]: event.target.value }))} placeholder="Referencia de pago" value={paymentReferences[item.id] ?? ""} /><input accept=".pdf,image/*" className="field" onChange={(event) => setPaymentReceipts((current) => ({ ...current, [item.id]: event.target.files?.[0] ?? null }))} type="file" /><button className="button-secondary" disabled={markingChargeId === item.id} onClick={() => void handleMarkAsPaid(item.id)} type="button">{markingChargeId === item.id ? "Imputando..." : "Marcar como pagado"}</button></div>}</div>;
+              return <div className="rounded-2xl border border-slate-200 bg-white/80 p-4" key={item.id}><div className="flex items-start justify-between gap-3"><div><h4 className="text-lg font-semibold text-slate-950">Unidad {unit?.codigo ?? "sin codigo"}</h4><p className="mt-1 text-sm leading-7 text-slate-600">Periodo {item.periodo_referencia} · $ {Number(item.monto).toLocaleString("es-AR")}</p></div><span className="status-badge status-badge--neutral">{item.estado}</span></div><div className="mt-3 grid gap-3 md:grid-cols-2"><label><span className="field-label">Vencimiento</span><input className="field mt-2" onChange={(event) => setChargeDueDates((current) => ({ ...current, [item.id]: event.target.value }))} type="date" value={chargeDueDates[item.id] ?? ""} /></label><label><span className="field-label">Enlace o instruccion</span><input className="field mt-2" onChange={(event) => setChargeLinks((current) => ({ ...current, [item.id]: event.target.value }))} placeholder="https://..., alias o CBU" value={chargeLinks[item.id] ?? ""} /></label></div><label className="mt-3 block"><span className="field-label">Detalle</span><textarea className="field-textarea mt-2" onChange={(event) => setChargeDetails((current) => ({ ...current, [item.id]: event.target.value }))} rows={3} value={chargeDetails[item.id] ?? ""} /></label><div className="mt-3 flex flex-wrap gap-3">{chargeLinks[item.id] ? isExternalUrl(chargeLinks[item.id]) ? <a className="button-secondary" href={chargeLinks[item.id]} rel="noreferrer" target="_blank">Abrir enlace</a> : <span className="rounded-full bg-slate-100 px-3 py-2 text-xs uppercase tracking-[0.18em] text-slate-500">Instruccion manual cargada</span> : null}<button className="button-secondary" disabled={savingChargeId === item.id} onClick={() => void handleSaveChargeCollection(item.id)} type="button">{savingChargeId === item.id ? "Guardando..." : "Guardar cobranza"}</button></div>{isPaid ? <div className="mt-3 text-sm leading-7 text-emerald-700">Pago registrado {item.referencia_pago ? `· Ref. ${item.referencia_pago}` : ""}{item.comprobante_url ? <div className="mt-2"><a className="button-secondary" href={item.comprobante_url} rel="noreferrer" target="_blank">Ver comprobante</a></div> : null}</div> : <div className="mt-3 grid gap-3 md:grid-cols-[1fr_1fr_auto]"><input className="field" onChange={(event) => setPaymentReferences((current) => ({ ...current, [item.id]: event.target.value }))} placeholder="Referencia de pago" value={paymentReferences[item.id] ?? ""} /><div className="grid gap-2"><input accept=".pdf,image/*" className="field" onChange={(event) => setPaymentReceipts((current) => ({ ...current, [item.id]: event.target.files?.[0] ?? null }))} type="file" /><p className="text-xs leading-6 text-slate-500">Si adjuntas una imagen, se convierte a WebP con 1200 px maximo de ancho y tope final de 3 MB.</p></div><button className="button-secondary" disabled={markingChargeId === item.id} onClick={() => void handleMarkAsPaid(item.id)} type="button">{markingChargeId === item.id ? "Imputando..." : "Marcar como pagado"}</button></div>}</div>;
             })}
           </div>
         </article>

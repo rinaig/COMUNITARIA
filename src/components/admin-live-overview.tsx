@@ -41,6 +41,22 @@ type ReservationItem = {
   estado: string;
 };
 
+type OutboundItem = {
+  id: string;
+  asunto: string;
+  estado: string;
+  canal: "email" | "whatsapp";
+  proveedor: string | null;
+  destinatario_email: string | null;
+  destinatario_ref: string | null;
+  created_at: string;
+};
+
+const channelLabels = {
+  email: "Email",
+  whatsapp: "WhatsApp",
+} as const;
+
 export function AdminLiveOverview() {
   const supabase = useMemo(() => getSupabaseBrowserClient(), []);
   const configured = isSupabaseConfigured();
@@ -64,7 +80,18 @@ export function AdminLiveOverview() {
       .toISOString()
       .slice(0, 10);
 
-    const [claimsCountResult, pendingResidentsResult, reservationsResult, expensesResult, latestAnnouncementsResult, latestClaimsResult, latestReservationsResult] = await Promise.all([
+    const [
+      claimsCountResult,
+      pendingResidentsResult,
+      reservationsResult,
+      pendingOutboundResult,
+      failedOutboundResult,
+      expensesResult,
+      latestAnnouncementsResult,
+      latestClaimsResult,
+      latestReservationsResult,
+      latestOutboundResult,
+    ] = await Promise.all([
       supabase
         .from("reclamos")
         .select("id", { count: "exact", head: true })
@@ -78,6 +105,14 @@ export function AdminLiveOverview() {
         .from("reservas")
         .select("id", { count: "exact", head: true })
         .gte("fecha", monthStart),
+      supabase
+        .from("notificacion_salidas")
+        .select("id", { count: "exact", head: true })
+        .eq("estado", "pendiente"),
+      supabase
+        .from("notificacion_salidas")
+        .select("id", { count: "exact", head: true })
+        .eq("estado", "fallido"),
       supabase
         .from("gastos")
         .select("monto, fecha_gasto")
@@ -97,16 +132,24 @@ export function AdminLiveOverview() {
         .select("id, fecha, hora_inicio, hora_fin, estado")
         .order("fecha", { ascending: false })
         .limit(3),
+      supabase
+        .from("notificacion_salidas")
+        .select("id, asunto, estado, canal, proveedor, destinatario_email, destinatario_ref, created_at")
+        .order("created_at", { ascending: false })
+        .limit(3),
     ]);
 
     const firstError = [
       claimsCountResult.error,
       pendingResidentsResult.error,
       reservationsResult.error,
+      pendingOutboundResult.error,
+      failedOutboundResult.error,
       expensesResult.error,
       latestAnnouncementsResult.error,
       latestClaimsResult.error,
       latestReservationsResult.error,
+      latestOutboundResult.error,
     ].find(Boolean);
 
     if (firstError) {
@@ -129,6 +172,16 @@ export function AdminLiveOverview() {
         label: "Vecinos pendientes",
         value: String(pendingResidentsResult.count ?? 0),
         detail: "Altas esperando aprobacion",
+      },
+      {
+        label: "Salidas pendientes",
+        value: String(pendingOutboundResult.count ?? 0),
+        detail: "Cola saliente por procesar",
+      },
+      {
+        label: "Salidas fallidas",
+        value: String(failedOutboundResult.count ?? 0),
+        detail: "Requieren revision de canal o credenciales",
       },
       {
         label: "Reservas del mes",
@@ -158,7 +211,14 @@ export function AdminLiveOverview() {
       date: new Date(item.fecha).toLocaleDateString("es-AR"),
     }));
 
-    setActivity([...claimActivity, ...reservationActivity].slice(0, 6));
+    const outboundActivity = ((latestOutboundResult.data as OutboundItem[] | null) ?? []).map((item) => ({
+      title: item.asunto,
+      detail: `${channelLabels[item.canal]} · ${item.destinatario_ref ?? item.destinatario_email ?? "sin destino"} · ${item.proveedor ?? "sin proveedor"}`,
+      status: item.estado,
+      date: new Date(item.created_at).toLocaleDateString("es-AR"),
+    }));
+
+    setActivity([...outboundActivity, ...claimActivity, ...reservationActivity].slice(0, 6));
     setLoading(false);
   }, [supabase]);
 
@@ -214,7 +274,7 @@ export function AdminLiveOverview() {
           </h3>
         </div>
         <p className="max-w-xl text-sm leading-7 text-slate-600">
-          Este bloque ya no usa mocks: lee reclamos, reservas, gastos y anuncios reales segun las politicas RLS del usuario autenticado.
+          Este bloque ya no usa mocks: lee reclamos, reservas, anuncios, gastos y cola saliente reales segun las politicas RLS del usuario autenticado.
         </p>
       </div>
 

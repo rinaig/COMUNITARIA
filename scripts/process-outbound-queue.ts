@@ -1,6 +1,33 @@
 import { createClient } from "@supabase/supabase-js";
 import { processOutboundQueue } from "../src/lib/outbound-processor";
 
+function getMissingScriptEnvNames() {
+  const missing: string[] = [];
+  const hasUrl = Boolean(process.env.SUPABASE_URL?.trim() || process.env.NEXT_PUBLIC_SUPABASE_URL?.trim());
+  const hasProjectId = Boolean(process.env.SUPABASE_PROJECT_ID?.trim());
+  const hasServiceRoleKey = Boolean(process.env.SUPABASE_SERVICE_ROLE_KEY?.trim());
+
+  if (!hasUrl && !hasProjectId) {
+    missing.push("SUPABASE_URL o SUPABASE_PROJECT_ID");
+  }
+
+  if (!hasServiceRoleKey) {
+    missing.push("SUPABASE_SERVICE_ROLE_KEY");
+  }
+
+  return missing;
+}
+
+function getScriptEnvIssueMessage() {
+  const missing = getMissingScriptEnvNames();
+
+  if (missing.length === 0) {
+    return "";
+  }
+
+  return `No se puede procesar la cola outbound por CLI. Completa estas variables: ${missing.join(", ")}.`;
+}
+
 function getRequiredEnv(name: string) {
   const value = process.env[name]?.trim();
   if (!value) {
@@ -11,6 +38,11 @@ function getRequiredEnv(name: string) {
 }
 
 async function main() {
+  const envIssue = getScriptEnvIssueMessage();
+  if (envIssue) {
+    throw new Error(envIssue);
+  }
+
   const supabaseUrl = process.env.SUPABASE_URL?.trim()
     || process.env.NEXT_PUBLIC_SUPABASE_URL?.trim()
     || `https://${getRequiredEnv("SUPABASE_PROJECT_ID")}.supabase.co`;

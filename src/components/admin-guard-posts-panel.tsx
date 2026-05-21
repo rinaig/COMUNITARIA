@@ -25,6 +25,11 @@ type GuardAssignment = {
   guardia_id: string;
 };
 
+type TenantLimit = {
+  trial_unit_limit: number;
+  trial_guard_post_limit: number;
+};
+
 export function AdminGuardPostsPanel() {
   const supabase = useMemo(() => getSupabaseBrowserClient(), []);
   const configured = isSupabaseConfigured();
@@ -36,13 +41,14 @@ export function AdminGuardPostsPanel() {
   const [posts, setPosts] = useState<GuardPost[]>([]);
   const [guards, setGuards] = useState<SecurityProfile[]>([]);
   const [assignments, setAssignments] = useState<GuardAssignment[]>([]);
+  const [tenantLimit, setTenantLimit] = useState<TenantLimit | null>(null);
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [location, setLocation] = useState("");
   const [busyAssignmentKey, setBusyAssignmentKey] = useState("");
   const [busyPostId, setBusyPostId] = useState("");
 
-  const loadData = useCallback(async () => {
+  const loadData = useCallback(async (userId: string) => {
     if (!supabase) {
       return;
     }
@@ -50,13 +56,16 @@ export function AdminGuardPostsPanel() {
     setLoading(true);
     setError("");
 
-    const [postsResult, guardsResult, assignmentsResult] = await Promise.all([
+    const consorcioId = await getCurrentConsorcioId(supabase, userId);
+
+    const [postsResult, guardsResult, assignmentsResult, tenantResult] = await Promise.all([
       supabase.from("puntos_vigilancia").select("id, nombre, descripcion, ubicacion, activo").order("nombre", { ascending: true }),
       supabase.from("profiles").select("id, nombre, apellido").eq("rol", "seguridad").eq("estado", "activo").order("apellido", { ascending: true }).order("nombre", { ascending: true }),
       supabase.from("punto_vigilancia_guardias").select("id, punto_id, guardia_id"),
+      supabase.from("consorcios").select("trial_unit_limit, trial_guard_post_limit").eq("id", consorcioId).maybeSingle(),
     ]);
 
-    const firstError = [postsResult.error, guardsResult.error, assignmentsResult.error].find(Boolean);
+    const firstError = [postsResult.error, guardsResult.error, assignmentsResult.error, tenantResult.error].find(Boolean);
     if (firstError) {
       setError(firstError.message);
       setLoading(false);
@@ -66,6 +75,7 @@ export function AdminGuardPostsPanel() {
     setPosts((postsResult.data as GuardPost[] | null) ?? []);
     setGuards((guardsResult.data as SecurityProfile[] | null) ?? []);
     setAssignments((assignmentsResult.data as GuardAssignment[] | null) ?? []);
+    setTenantLimit((tenantResult.data as TenantLimit | null) ?? null);
     setLoading(false);
   }, [supabase]);
 
@@ -90,7 +100,7 @@ export function AdminGuardPostsPanel() {
 
       setSession(data.session ?? null);
       if (data.session?.user) {
-        await loadData();
+        await loadData(data.session.user.id);
       } else {
         setLoading(false);
       }
@@ -114,6 +124,13 @@ export function AdminGuardPostsPanel() {
     setMessage("");
 
     try {
+      const currentTrialLimit = tenantLimit?.trial_guard_post_limit ?? 1;
+      if (tenantLimit && posts.length >= currentTrialLimit) {
+        setError(`La prueba inicial permite hasta ${currentTrialLimit} puesto${currentTrialLimit === 1 ? "" : "s"} de vigilancia.`);
+        setSaving(false);
+        return;
+      }
+
       const consorcioId = await getCurrentConsorcioId(supabase, session.user.id);
       const { error: insertError } = await supabase.from("puntos_vigilancia").insert({
         consorcio_id: consorcioId,
@@ -130,7 +147,7 @@ export function AdminGuardPostsPanel() {
       setDescription("");
       setLocation("");
       setMessage("Punto de vigilancia creado correctamente.");
-      await loadData();
+      await loadData(session.user.id);
     } catch (submitError) {
       setError(submitError instanceof Error ? submitError.message : "No se pudo crear el punto de vigilancia.");
     }
@@ -156,7 +173,9 @@ export function AdminGuardPostsPanel() {
     }
 
     setMessage(post.activo ? "Punto archivado." : "Punto reactivado.");
-    await loadData();
+    if (session?.user) {
+      await loadData(session.user.id);
+    }
     setBusyPostId("");
   }
 
@@ -195,7 +214,7 @@ export function AdminGuardPostsPanel() {
       setMessage("Guardia asignado al punto.");
     }
 
-    await loadData();
+    await loadData(session.user.id);
     setBusyAssignmentKey("");
   }
 
@@ -215,12 +234,14 @@ export function AdminGuardPostsPanel() {
 
       {error ? <article className="role-card mt-6 border-amber-200 bg-amber-50/80"><p className="text-sm font-semibold text-amber-700">Error</p><p className="mt-2 text-sm leading-7 text-amber-700">{error}</p></article> : null}
       {message ? <article className="role-card mt-6 border-emerald-200 bg-emerald-50/80"><p className="text-sm font-semibold text-emerald-700">Estado</p><p className="mt-2 text-sm leading-7 text-emerald-700">{message}</p></article> : null}
+      {tenantLimit ? <article className="role-card mt-6 border-emerald-200 bg-emerald-50/80"><p className="text-sm font-semibold text-emerald-700">Prueba inicial activa</p><p className="mt-2 text-sm leading-7 text-emerald-700">Puedes operar hasta {tenantLimit.trial_guard_post_limit} puesto{tenantLimit.trial_guard_post_limit === 1 ? "" : "s"} de vigilancia. Hoy tienes {posts.length} configurado{posts.length === 1 ? "" : "s"}.</p></article> : null}
 
       <div className="mt-6 grid gap-6 lg:grid-cols-[0.88fr_1.12fr]">
         <form className="role-card grid gap-4" onSubmit={handleCreatePost}>
           <label><span className="field-label">Nombre del puesto</span><input className="field mt-2" onChange={(event) => setName(event.target.value)} placeholder="Ej: Porteria principal" required value={name} /></label>
           <label><span className="field-label">Ubicacion</span><input className="field mt-2" onChange={(event) => setLocation(event.target.value)} placeholder="Ej: Acceso por calle Rivadavia" value={location} /></label>
           <label><span className="field-label">Descripcion</span><textarea className="field-textarea mt-2" onChange={(event) => setDescription(event.target.value)} placeholder="Cobertura, horario o notas operativas" rows={4} value={description} /></label>
+          {tenantLimit ? <p className="text-sm leading-7 text-slate-600">Esta prueba acepta como maximo {tenantLimit.trial_guard_post_limit} puesto{tenantLimit.trial_guard_post_limit === 1 ? "" : "s"}. Si superas ese numero, la base rechazara el alta.</p> : null}
           <button className="button-primary" disabled={saving || loading} type="submit">{saving ? "Guardando..." : "Crear punto de vigilancia"}</button>
         </form>
 

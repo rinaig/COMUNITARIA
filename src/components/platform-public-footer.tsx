@@ -3,19 +3,12 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { getSupabaseBrowserClient, isSupabaseConfigured } from "@/lib/supabase";
-
-type PlatformSettings = {
-  support_email: string | null;
-  support_phone: string | null;
-  instagram_url: string | null;
-  x_url: string | null;
-  facebook_url: string | null;
-};
+import { loadPlatformSettingsCompat, type PlatformSettingsCompatRow } from "@/lib/platform-schema-compat";
 
 export function PlatformPublicFooter() {
   const supabase = useMemo(() => getSupabaseBrowserClient(), []);
   const configured = isSupabaseConfigured();
-  const [settings, setSettings] = useState<PlatformSettings | null>(null);
+  const [settings, setSettings] = useState<PlatformSettingsCompatRow | null>(null);
 
   useEffect(() => {
     if (!configured || !supabase) {
@@ -25,14 +18,10 @@ export function PlatformPublicFooter() {
     let ignore = false;
 
     const load = async () => {
-      const { data } = await supabase
-        .from("platform_settings")
-        .select("support_email, support_phone, instagram_url, x_url, facebook_url")
-        .eq("id", true)
-        .maybeSingle();
+      const result = await loadPlatformSettingsCompat(supabase);
 
       if (!ignore) {
-        setSettings((data as PlatformSettings | null) ?? null);
+        setSettings(result.error ? null : result.data);
       }
     };
 
@@ -47,6 +36,7 @@ export function PlatformPublicFooter() {
   const supportPhone = settings?.support_phone || "";
   const socialLinks = [
     { label: "Instagram", href: settings?.instagram_url },
+    { label: "LinkedIn", href: settings?.linkedin_url },
     { label: "X", href: settings?.x_url },
     { label: "Facebook", href: settings?.facebook_url },
   ];
