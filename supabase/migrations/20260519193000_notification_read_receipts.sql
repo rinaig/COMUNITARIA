@@ -64,6 +64,8 @@ grant execute on function public.mark_visible_notifications_read(uuid[]) to auth
 
 alter table public.notificacion_lecturas enable row level security;
 
+drop policy if exists "tenant_notification_reads_select" on public.notificacion_lecturas;
+
 create policy "tenant_notification_reads_select"
 on public.notificacion_lecturas
 for select
@@ -81,6 +83,8 @@ using (
   )
 );
 
+drop policy if exists "tenant_notification_reads_insert" on public.notificacion_lecturas;
+
 create policy "tenant_notification_reads_insert"
 on public.notificacion_lecturas
 for insert
@@ -88,6 +92,8 @@ with check (
   public.is_superadmin()
   or profile_id = auth.uid()
 );
+
+drop policy if exists "tenant_notification_reads_update" on public.notificacion_lecturas;
 
 create policy "tenant_notification_reads_update"
 on public.notificacion_lecturas

@@ -67,10 +67,14 @@ for each row execute function public.log_platform_audit_event();
 
 alter table public.platform_audit_events enable row level security;
 
+drop policy if exists "platform_audit_superadmin_read" on public.platform_audit_events;
+
 create policy "platform_audit_superadmin_read"
 on public.platform_audit_events
 for select
 using (public.is_superadmin());
+
+drop policy if exists "platform_audit_actor_insert" on public.platform_audit_events;
 
 create policy "platform_audit_actor_insert"
 on public.platform_audit_events
