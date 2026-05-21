@@ -1,7 +1,7 @@
 "use client";
 
-import { startTransition, useCallback, useEffect, useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
+import Link from "next/link";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import type { Session } from "@supabase/supabase-js";
 import * as XLSX from "xlsx";
 import type { ProfileRecord } from "@/lib/auth-types";
@@ -124,7 +124,6 @@ function createWorksheetData(rows: PlatformRow[]) {
 }
 
 export function PlatformLiveConsole() {
-  const router = useRouter();
   const supabase = useMemo(() => getSupabaseBrowserClient(), []);
   const configured = isSupabaseConfigured();
   const [session, setSession] = useState<Session | null>(null);
@@ -392,12 +391,9 @@ export function PlatformLiveConsole() {
     XLSX.writeFile(workbook, "administradores-comunitaria.xlsx");
   }
 
-  function openDemoPortal(role: DemoRole) {
+  function primeDemoPortal(role: DemoRole) {
     const demoSession = createDemoPortalSession(role);
     window.localStorage.setItem(DEMO_PORTAL_STORAGE_KEY, JSON.stringify(demoSession));
-    startTransition(() => {
-      router.push(`/portal/demo/${role}`);
-    });
   }
 
   const isSuperadmin = profile?.rol === "superadmin";
@@ -418,9 +414,9 @@ export function PlatformLiveConsole() {
             <p className="mt-2 max-w-3xl text-sm leading-7 text-sky-900">Desde SuperUser ya puedes abrir un showcase local por perfil para presentar modulos sin tocar sesiones productivas ni depender de datos reales del consorcio.</p>
             <div className="mt-4 flex flex-wrap gap-3">
               {(["admin", "residente", "seguridad"] as DemoRole[]).map((item) => (
-                <button className="button-secondary" key={item} onClick={() => openDemoPortal(item)} type="button">
+                <Link className="button-secondary" href={`/portal/demo/${item}`} key={item} onClick={() => primeDemoPortal(item)}>
                   Abrir demo {roleLabels[item]}
-                </button>
+                </Link>
               ))}
             </div>
           </article>

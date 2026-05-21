@@ -111,13 +111,10 @@ export function DemoPortalExperience({ role }: DemoPortalExperienceProps) {
     }
   }, [role]);
 
-  function openRole(nextRole: DemoRole) {
+  function primeRole(nextRole: DemoRole) {
     const nextSession = createDemoPortalSession(nextRole);
     window.localStorage.setItem(DEMO_PORTAL_STORAGE_KEY, JSON.stringify(nextSession));
     setDemoSession(nextSession);
-    startTransition(() => {
-      router.push(`/portal/demo/${nextRole}`);
-    });
   }
 
   function exitDemoMode() {
@@ -157,9 +154,9 @@ export function DemoPortalExperience({ role }: DemoPortalExperienceProps) {
               <p className="mt-4 max-w-3xl text-base leading-8 text-slate-600">{content.description}</p>
               <div className="mt-6 flex flex-wrap gap-3">
                 {demoRoles.map((item) => (
-                  <button className={item === role ? "button-primary" : "button-secondary"} key={item} onClick={() => openRole(item)} type="button">
+                  <Link className={item === role ? "button-primary" : "button-secondary"} href={`/portal/demo/${item}`} key={item} onClick={() => primeRole(item)}>
                     {roleLabels[item]}
-                  </button>
+                  </Link>
                 ))}
               </div>
               <div className="mt-8 grid gap-4 sm:grid-cols-3">

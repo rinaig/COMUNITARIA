@@ -7,7 +7,7 @@ import type { ProfileRecord } from "@/lib/auth-types";
 import { CollapsiblePanelSection } from "@/components/collapsible-panel-section";
 import { HOME_CONTENT_STORAGE_KEY, HOME_IMAGE_OPTIONS, normalizeHomeContent, type HomeContentConfig, type HomeModuleContent } from "@/lib/home-content";
 import { getSupabaseBrowserClient, isSupabaseConfigured } from "@/lib/supabase";
-import { getCompatIssueMessage, loadPlatformSettingsCompat, savePlatformSettingsCompat, type PlatformSettingsCompatRow } from "@/lib/platform-schema-compat";
+import { PLATFORM_PUBLIC_SETTINGS_STORAGE_KEY, getCompatIssueMessage, loadPlatformSettingsCompat, savePlatformSettingsCompat, type PlatformSettingsCompatRow } from "@/lib/platform-schema-compat";
 
 type Tenant = {
   id: string;
@@ -304,6 +304,14 @@ export function PlatformBillingPanel() {
     }
   }
 
+  function persistPublicSettingsPreview(payload: PlatformSettingsCompatRow) {
+    try {
+      window.localStorage.setItem(PLATFORM_PUBLIC_SETTINGS_STORAGE_KEY, JSON.stringify(payload));
+    } catch {
+      // ignore local preview persistence errors
+    }
+  }
+
   function updateHomeContentField<K extends keyof HomeContentConfig>(field: K, value: HomeContentConfig[K]) {
     setHomeContent((current) => ({ ...current, [field]: value }));
   }
@@ -340,6 +348,8 @@ export function PlatformBillingPanel() {
       setSavingGlobalPrice(false);
       return;
     }
+
+    persistPublicSettingsPreview(buildSettingsPayload());
 
     setSchemaWarning(saveResult.warning ?? schemaWarning);
 

@@ -3,12 +3,25 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { getSupabaseBrowserClient, isSupabaseConfigured } from "@/lib/supabase";
-import { loadPlatformSettingsCompat, type PlatformSettingsCompatRow } from "@/lib/platform-schema-compat";
+import { PLATFORM_PUBLIC_SETTINGS_STORAGE_KEY, loadPlatformSettingsCompat, type PlatformSettingsCompatRow } from "@/lib/platform-schema-compat";
+
+function readPreviewSettings() {
+  try {
+    const raw = window.localStorage.getItem(PLATFORM_PUBLIC_SETTINGS_STORAGE_KEY);
+    if (!raw) {
+      return null;
+    }
+
+    return JSON.parse(raw) as PlatformSettingsCompatRow;
+  } catch {
+    return null;
+  }
+}
 
 export function PlatformPublicFooter() {
   const supabase = useMemo(() => getSupabaseBrowserClient(), []);
   const configured = isSupabaseConfigured();
-  const [settings, setSettings] = useState<PlatformSettingsCompatRow | null>(null);
+  const [settings, setSettings] = useState<PlatformSettingsCompatRow | null>(() => typeof window === "undefined" ? null : readPreviewSettings());
 
   useEffect(() => {
     if (!configured || !supabase) {
@@ -18,6 +31,11 @@ export function PlatformPublicFooter() {
     let ignore = false;
 
     const load = async () => {
+      const preview = readPreviewSettings();
+      if (!ignore && preview) {
+        setSettings(preview);
+      }
+
       const result = await loadPlatformSettingsCompat(supabase);
 
       if (!ignore) {

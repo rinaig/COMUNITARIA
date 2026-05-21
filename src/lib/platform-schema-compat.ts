@@ -28,6 +28,8 @@ type CompatResult<T> = {
   error: string | null;
 };
 
+export const PLATFORM_PUBLIC_SETTINGS_STORAGE_KEY = "comunitaria.platform.public-settings.v1";
+
 const PLATFORM_SETTINGS_DEFAULTS: PlatformSettingsCompatRow = {
   default_unit_price: 0,
   support_email: null,

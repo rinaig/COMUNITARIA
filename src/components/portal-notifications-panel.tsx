@@ -143,7 +143,7 @@ export function PortalNotificationsPanel() {
 
   const unreadCount = notifications.filter((item) => !item.isRead).length;
 
-  async function markAllAsRead() {
+  const markAllAsRead = useCallback(async () => {
     if (!supabase) {
       return;
     }
@@ -163,7 +163,7 @@ export function PortalNotificationsPanel() {
     }
 
     await loadNotifications();
-  }
+  }, [loadNotifications, notifications, supabase]);
 
   if (!configured || !session?.user) {
     return null;
@@ -176,21 +176,21 @@ export function PortalNotificationsPanel() {
       </button>
 
       {open ? (
-        <div className="fixed inset-x-4 top-24 z-50 rounded-[1.75rem] border border-slate-200 bg-white/95 p-5 shadow-[0_24px_60px_rgba(15,23,42,0.14)] backdrop-blur sm:absolute sm:inset-x-auto sm:right-0 sm:top-[calc(100%+0.75rem)] sm:w-[24rem]">
+        <div className="absolute right-0 top-[calc(100%+0.75rem)] z-50 w-[min(24rem,calc(100vw-1.5rem))] max-w-[calc(100vw-1.5rem)] rounded-[1.75rem] border border-slate-200 bg-white/95 p-5 shadow-[0_24px_60px_rgba(15,23,42,0.14)] backdrop-blur">
           <div className="flex items-center justify-between gap-3">
             <div>
               <p className="text-sm uppercase tracking-[0.2em] text-slate-500">Bandeja</p>
               <h4 className="mt-2 text-xl font-semibold text-slate-950">Eventos recientes</h4>
             </div>
             <div className="flex flex-wrap gap-2">
-              <button className="button-secondary" onClick={() => void markAllAsRead()} type="button">Marcar leidas</button>
+              <button className="button-secondary" disabled={loading || unreadCount === 0} onClick={() => void markAllAsRead()} type="button">Marcar leidas</button>
               <button className="button-secondary" onClick={() => setOpen(false)} type="button">Cerrar</button>
             </div>
           </div>
 
           {error ? <p className="mt-4 text-sm leading-7 text-amber-700">{error}</p> : null}
           <div className="mt-4 grid max-h-[min(70vh,32rem)] gap-3 overflow-y-auto pr-1">
-            {loading ? <p className="text-sm leading-7 text-slate-600">Cargando notificaciones.</p> : notifications.length === 0 ? <p className="text-sm leading-7 text-slate-600">Todavia no hay eventos para mostrar.</p> : notifications.map((item) => <div className="rounded-2xl border border-slate-200 bg-slate-50/85 p-4" key={item.id}><div className="flex items-start justify-between gap-3"><h5 className="text-sm font-semibold text-slate-950">{item.titulo}</h5><span className={item.isRead ? "status-badge status-badge--neutral" : "status-badge status-badge--warning"}>{item.isRead ? "leida" : "nueva"}</span></div><p className="mt-2 text-sm leading-6 text-slate-600">{item.detalle}</p><p className="mt-2 text-xs uppercase tracking-[0.16em] text-slate-400">{item.categoria} · {new Date(item.created_at).toLocaleString("es-AR")}</p></div>)}
+            {loading ? <p className="text-sm leading-7 text-slate-600">Cargando notificaciones.</p> : notifications.length === 0 ? <p className="text-sm leading-7 text-slate-600">Todavia no hay eventos para mostrar.</p> : notifications.map((item) => <div className="rounded-2xl border border-slate-200 bg-slate-50/85 p-4" key={item.id}><div className="flex items-start justify-between gap-3"><h5 className="text-sm font-semibold text-slate-950">{item.titulo}</h5>{item.isRead ? null : <span className="status-badge status-badge--warning">Nueva</span>}</div><p className="mt-2 text-sm leading-6 text-slate-600">{item.detalle}</p><p className="mt-2 text-xs uppercase tracking-[0.16em] text-slate-400">{item.categoria} · {new Date(item.created_at).toLocaleString("es-AR")}</p></div>)}
           </div>
         </div>
       ) : null}
